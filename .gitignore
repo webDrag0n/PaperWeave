@@ -1,0 +1,19 @@
+# 依赖与运行时
+node_modules/
+tools/runtime/
+
+# 构建产物（发行物发布到 GitHub Releases，不入库）
+release*/
+
+# 自测产物（README 截图统一放 README.assets/，可追溯）
+.selftest-data/
+.selftest-data2/
+selftest-report.json
+shots/
+
+# 系统与编辑器杂项
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+NVIDIA Corporation/

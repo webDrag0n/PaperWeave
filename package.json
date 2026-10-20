@@ -1,0 +1,87 @@
+{
+  "name": "papergraph",
+  "version": "0.9.0",
+  "description": "PaperGraph - lightweight cross-platform paper reader with 3D citation graph",
+  "main": "main/main.js",
+  "author": "PaperGraph",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "node tools/dev-server.js",
+    "selftest": "node tools/selftest.js",
+    "pack": "node tools/build.js --dir",
+    "dist": "node tools/build.js",
+    "dist:win": "node tools/build.js --win",
+    "dist:mac": "node tools/build.js --mac",
+    "dist:linux": "node tools/build.js --linux",
+    "dist:all": "node tools/build.js --win --mac --linux",
+    "apitest": "node tools/api-test.js",
+    "mcptest": "node tools/mcp-test.js"
+  },
+  "build": {
+    "appId": "com.papergraph.app",
+    "productName": "PaperGraph",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main/**/*",
+      "preload/**/*",
+      "renderer/**/*",
+      "vendor/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "agents/AGENTS.md",
+        "to": "AGENTS.md"
+      },
+      {
+        "from": "mcp/papergraph-mcp.js",
+        "to": "papergraph-mcp.js"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "PaperGraph",
+      "artifactName": "PaperGraph-${version}-win-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "PaperGraph-${version}-win-${arch}-portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "artifactName": "PaperGraph-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "artifactName": "PaperGraph-${version}-linux-${arch}.${ext}"
+    }
+  },
+  "dependencies": {
+    "pdfjs-dist": "^4.10.38",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  }
+}

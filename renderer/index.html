@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self' https://api.semanticscholar.org https://api.openalex.org https://arxiv.org https://api.crossref.org https://export.arxiv.org; font-src 'self' data:">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PaperGraph</title>
+<link rel="stylesheet" href="styles.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "../vendor/three/three.module.js",
+    "three/addons/": "../vendor/three/addons/",
+    "pdfjs": "../vendor/pdfjs/pdf.mjs"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand" id="brandHome" data-i18n-title="回到论文库" title="回到论文库">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="3" fill="#4aa3ff"/><circle cx="18" cy="8" r="3" fill="#ff7a4a"/><circle cx="11" cy="17" r="3" fill="#ffd54a"/><path d="M8.5 7.4 15.3 7.8M7.3 8.8l2.7 5.4M13 14.8l3.6-4.2" stroke="#8a8f99" stroke-width="1.2"/></svg>
+      <span>PaperGraph</span>
+    </div>
+    <div class="search-wrap" id="searchWrap">
+      <input id="searchInput" type="search" data-i18n-ph="搜索论文标题、作者、标签、DOI…" placeholder="搜索论文标题、作者、标签、DOI…" autocomplete="off">
+    </div>
+    <div class="top-actions">
+      <button class="btn" id="btnBulkMode" data-i18n="☑️ 批量" data-i18n-title="批量选择并删除论文" title="批量选择并删除论文">☑️ 批量</button>
+      <button class="btn" id="btnImport" data-i18n="📥 导入" data-i18n-title="导入论文：链接 / 拖拽文件 / 选择文件" title="导入论文：链接 / 拖拽文件 / 选择文件">📥 导入</button>
+      <button class="icon-btn wide" id="btnLang" data-i18n-title="切换中英文界面" title="切换中英文界面">🌐 EN</button>
+      <button class="icon-btn wide" id="btnTheme" data-i18n-title="切换浅色 / 深色主题" title="切换浅色 / 深色主题">☀️</button>
+    </div>
+  </header>
+
+  <div id="main">
+    <!-- 论文库视图 -->
+    <section id="libraryView" class="view">
+      <div id="dropHint" class="drop-hint hidden" data-i18n="松开鼠标，导入这些 PDF">松开鼠标，导入这些 PDF</div>
+      <div class="library-layout">
+        <!-- 左侧论文库面板：可展开/缩回 -->
+        <aside id="libSidebar">
+          <div class="libside-rail">
+            <button id="btnLibToggle" data-i18n-title="展开 / 收起论文库面板" title="展开 / 收起论文库面板">▶<span class="rail-label" data-i18n="论文库">论文库</span></button>
+            <div id="libRailIcons" class="lib-rail-icons"></div>
+          </div>
+          <div class="libside-body">
+            <div class="libside-head">
+              <span data-i18n="论文库">论文库</span>
+              <button class="icon-btn" id="btnLibCollapse" data-i18n-title="收起论文库面板" title="收起论文库面板">◀</button>
+            </div>
+            <div id="libCards" class="lib-cards"></div>
+            <button class="btn small libside-new" id="btnNewLibrary" data-i18n="＋ 新建论文库">＋ 新建论文库</button>
+          </div>
+        </aside>
+        <div id="libraryMain">
+          <!-- 论文库头部 banner：图标 / 标题 / 简介 / 星标 / 删除 -->
+          <div id="libraryBanner" class="library-banner hidden">
+            <button id="libBannerIcon" class="lb-icon" data-i18n-title="点击更换标志图标" title="点击更换标志图标">📚</button>
+            <div class="lb-main">
+              <div class="lb-title-row">
+                <h1 id="libBannerName" class="lb-name" data-i18n-title="点击编辑名称" title="点击编辑名称"></h1>
+                <button id="libBannerStar" class="lb-star" data-i18n-title="星标置顶" title="星标置顶">☆</button>
+              </div>
+              <p id="libBannerDesc" class="lb-desc" data-i18n-title="点击编辑简介" title="点击编辑简介"></p>
+            </div>
+            <div class="lb-side">
+              <button class="icon-btn" id="libBannerDelete" data-i18n-title="删除论文库" title="删除论文库">🗑</button>
+            </div>
+          </div>
+          <div id="libraryEmpty" class="empty-state hidden">
+            <div class="empty-icon">📚</div>
+            <h2 data-i18n="开始建立你的论文库">开始建立你的论文库</h2>
+            <p><span data-i18n="点击「导入」按钮：粘贴链接、拖入文件或选择本地 PDF。导入的论文默认 1 星，点卡片上的星星即可调整重要性。">点击「导入」按钮：粘贴链接、拖入文件或选择本地 PDF。导入的论文默认 1 星，点卡片上的星星即可调整重要性。</span></p>
+            <div class="empty-actions">
+              <button class="btn btn-primary" id="btnImportEmpty" data-i18n="📥 导入">📥 导入</button>
+            </div>
+          </div>
+          <div id="libraryToolbar" class="library-toolbar">
+            <div id="libraryStats" class="library-stats"></div>
+            <span class="flex-spacer"></span>
+            <label class="sort-label"><span data-i18n="排序">排序</span>
+              <select id="sortSelect">
+                <option value="rating" data-i18n="按星级分区">按星级分区</option>
+                <option value="added" data-i18n="最新添加">最新添加</option>
+                <option value="year" data-i18n="年份（新→旧）">年份（新→旧）</option>
+                <option value="title" data-i18n="标题 A→Z">标题 A→Z</option>
+                <option value="links" data-i18n="引用关联最多">引用关联最多</option>
+              </select>
+            </label>
+            <button class="btn" id="btnDiscover" data-i18n="🧭 发现" data-i18n-title="库外发现：被库内多篇共同引用的先驱论文 / 同时引用多篇的衍生新作" title="库外发现：被库内多篇共同引用的先驱论文 / 同时引用多篇的衍生新作">🧭 发现</button>
+            <button class="btn" id="btnGraphFromLib" data-i18n="🌐 3D 关系图" data-i18n-title="查看整个论文库的 3D 引用关系图" title="查看整个论文库的 3D 引用关系图">🌐 3D 关系图</button>
+          </div>
+          <div id="libraryGrid" class="grid"></div>
+          <!-- 批量管理操作条 -->
+          <div id="bulkBar" class="bulk-bar hidden">
+            <label class="bulk-all"><input type="checkbox" id="bulkAll"> <span data-i18n="全选">全选</span></label>
+            <span id="bulkCount">已选 0 篇</span>
+            <span class="flex-spacer"></span>
+            <button class="btn small btn-danger" id="bulkDelete" data-i18n="删除所选">🗑 删除所选</button>
+            <button class="btn small" id="bulkExit" data-i18n="退出管理">退出管理</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3D 关系图视图 -->
+    <section id="graphView" class="view hidden">
+      <div id="graphCanvasWrap"></div>
+      <button class="btn graph-back" id="btnGraphBack">← 返回论文库</button>
+      <div class="graph-filter">
+        <label for="graphMinRating" data-i18n="节点筛选">节点筛选</label>
+        <select id="graphMinRating">
+          <option value="all" data-i18n="全部（含未评分）">全部（含未评分）</option>
+          <option value="1" data-i18n="≥ 1 星">≥ 1 星</option>
+          <option value="2" data-i18n="≥ 2 星">≥ 2 星</option>
+          <option value="3" data-i18n="≥ 3 星">≥ 3 星</option>
+          <option value="4" data-i18n="≥ 4 星">≥ 4 星</option>
+          <option value="5" data-i18n="仅 5 星">仅 5 星</option>
+        </select>
+      </div>
+      <div id="graphEmpty" class="hidden" data-i18n="当前筛选条件下没有论文">当前筛选条件下没有论文</div>
+      <div id="graphHopCtl" class="graph-hop hidden">
+        <span data-i18n="高亮跳数">高亮跳数</span>
+        <input type="range" id="hopRange" min="1" max="5" step="1" value="2">
+        <b id="hopLabel">2</b>
+        <span class="hop-tip" data-i18n="Shift+点击可多选，自动勾勒最短关联">Shift+点击可多选，自动勾勒最短关联</span>
+      </div>
+      <div id="graphLegend">
+        <div><span class="dot" style="background:#ffd54a"></span><span data-i18n="选中论文">选中论文</span></div>
+        <div><span class="dot" style="background:#4aa3ff"></span><span data-i18n="1 跳（直接关联）">1 跳（直接关联）</span></div>
+        <div><span class="dot" style="background:#ff7a4a"></span><span data-i18n="2 跳">2 跳</span></div>
+        <div><span class="dot" style="background:#b678ff"></span><span data-i18n="3 跳">3 跳</span></div>
+        <div><span class="dot" style="background:#7bf1a8"></span><span data-i18n="4 跳">4 跳</span></div>
+        <div><span class="dot" style="background:#f06292"></span><span data-i18n="5 跳">5 跳</span></div>
+        <div><span class="dot" style="background:#5b6270"></span><span data-i18n="跳数外的论文（灰色）">跳数外的论文（灰色）</span></div>
+        <div class="legend-tip" data-i18n="拖动旋转 · 滚轮缩放 · 单击选中 · Shift+点击多选 · 双击打开 · Esc 返回">拖动旋转 · 滚轮缩放 · 单击选中 · Shift+点击多选 · 双击打开 · Esc 返回</div>
+      </div>
+      <div id="graphTooltip" class="hidden"></div>
+      <div id="graphSide" class="hidden">
+        <button class="icon-btn close" id="graphSideClose">✕</button>
+        <h3 id="graphSideTitle"></h3>
+        <div class="meta" id="graphSideMeta"></div>
+        <div class="row" id="graphSideRefs"></div>
+        <div class="row" id="graphSideCites"></div>
+        <div class="row" id="graphSideSim"></div>
+        <div class="graph-side-actions">
+          <button class="btn btn-primary" id="graphSideOpen" data-i18n="📖 打开阅读">📖 打开阅读</button>
+          <button class="btn" id="graphSideFetch" data-i18n="🔄 抓取引用关系">🔄 抓取引用关系</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 阅读器视图 -->
+    <section id="readerView" class="view hidden">
+      <div id="readerHeader">
+        <button class="btn" id="btnBackLib" data-i18n="← 论文库">← 论文库</button>
+        <div class="reader-title" id="readerTitle"></div>
+        <div class="reader-controls">
+          <button class="icon-btn wide" id="btnGraphFromReader" data-i18n-title="查看本文的引用关系图" title="查看本文的引用关系图">🌐</button>
+          <span class="sep"></span>
+          <button class="icon-btn" id="zoomOut" data-i18n-title="缩小" title="缩小">−</button>
+          <span id="zoomLabel">100%</span>
+          <button class="icon-btn" id="zoomIn" data-i18n-title="放大" title="放大">＋</button>
+          <button class="icon-btn wide" id="btnFitWidth" data-i18n-title="适应页面宽度" title="适应页面宽度">↔</button>
+          <span class="sep"></span>
+          <span class="page-jump" data-i18n-title="跳转页码" title="跳转页码">
+            <input id="pageJumpInput" type="number" min="1" data-i18n-ph="页码" placeholder="页码">
+            <span id="pageTotalLabel">/ —</span>
+          </span>
+          <button class="icon-btn wide" id="btnEyeCare" data-i18n-title="护眼模式（深色反色）" title="护眼模式（深色反色）">🌙</button>
+          <span class="sep"></span>
+          <div class="hl-colors" id="hlColors" title="高亮颜色">
+            <button class="hl-dot" data-color="#ffe74a" style="background:#ffe74a"></button>
+            <button class="hl-dot" data-color="#7bf1a8" style="background:#7bf1a8"></button>
+            <button class="hl-dot" data-color="#7ac7ff" style="background:#7ac7ff"></button>
+            <button class="hl-dot" data-color="#ff9ad5" style="background:#ff9ad5"></button>
+            <button class="hl-dot" data-color="#ffb27a" style="background:#ffb27a"></button>
+          </div>
+          <button class="btn" id="btnStickyMode" data-i18n="📌 便利贴" data-i18n-title="在页面上放置便利贴" title="在页面上放置便利贴">📌 便利贴</button>
+          <button class="icon-btn wide" id="btnTogglePanel" data-i18n-title="收起 / 展开右侧面板" title="收起 / 展开右侧面板">⇥</button>
+        </div>
+      </div>
+      <div id="readerBody">
+        <!-- 目录：左侧可展开的半透明侧边栏 -->
+        <div id="outlineRail">
+          <button id="btnOutline" data-i18n-title="目录（点击展开）" title="目录（点击展开）">📑<span class="rail-label" data-i18n="目录">目录</span></button>
+        </div>
+        <div id="outlinePanel" class="hidden">
+          <div class="op-head">
+            <span>📑 <span data-i18n="目录">目录</span></span>
+            <button class="icon-btn" id="btnOutlineClose" data-i18n-title="收起目录" title="收起目录">✕</button>
+          </div>
+          <div id="outlineList" class="outline-list"></div>
+        </div>
+        <div id="pdfScroll">
+          <div id="pdfPages"></div>
+        </div>
+        <aside id="readerPanel">
+          <div class="tabs">
+            <button class="tab active" data-tab="info" data-i18n="信息">信息</button>
+            <button class="tab" data-tab="annots"><span data-i18n="批注">批注</span> <span class="badge" id="annotCount">0</span></button>
+            <button class="tab" data-tab="notes" data-i18n="笔记">笔记</button>
+            <button class="tab" data-tab="refs" data-i18n="引用">引用</button>
+            <button class="tab" data-tab="search" data-i18n="搜索">搜索</button>
+          </div>
+          <div class="tab-page" id="tab-info">
+            <div class="field"><label data-i18n="标题">标题</label><input id="metaTitle" type="text"></div>
+            <div class="field"><label data-i18n="作者（逗号分隔）">作者（逗号分隔）</label><input id="metaAuthors" type="text"></div>
+            <div class="field-row">
+              <div class="field"><label data-i18n="年份">年份</label><input id="metaYear" type="text"></div>
+              <div class="field"><label data-i18n="期刊/会议">期刊/会议</label><input id="metaVenue" type="text"></div>
+            </div>
+            <div class="field"><label data-i18n="DOI / arXiv">DOI / arXiv</label><input id="metaDoi" type="text"></div>
+            <div class="field"><label data-i18n="标签（逗号分隔）">标签（逗号分隔）</label><input id="metaTags" type="text"></div>
+            <div class="field"><label data-i18n="摘要">摘要</label><textarea id="metaAbstract" rows="5"></textarea></div>
+            <div class="field-actions">
+              <button class="btn btn-primary" id="btnSaveMeta" data-i18n="保存信息">保存信息</button>
+              <button class="btn" id="btnOpenFolder" data-i18n="📁 文件" data-i18n-title="在文件管理器中显示" title="在文件管理器中显示">📁 文件</button>
+              <button class="btn btn-danger" id="btnDeletePaper" data-i18n="删除">删除</button>
+            </div>
+          </div>
+          <div class="tab-page hidden" id="tab-annots">
+            <div id="annotList" class="annot-list"></div>
+          </div>
+          <div class="tab-page hidden" id="tab-notes">
+            <div class="notes-toolbar">
+              <button class="btn small" id="btnNotesEdit" data-i18n="编辑">编辑</button>
+              <button class="btn small" id="btnNotesPreview" data-i18n="预览">预览</button>
+              <span class="notes-hint" data-i18n="支持 Markdown">支持 Markdown</span>
+            </div>
+            <textarea id="notesEditor" data-i18n-ph="为这篇论文写笔记…\n\n# 核心想法\n- 要点 1\n- 要点 2" placeholder="为这篇论文写笔记…&#10;&#10;# 核心想法&#10;- 要点 1&#10;- 要点 2"></textarea>
+            <div id="notesPreview" class="markdown hidden"></div>
+          </div>
+          <div class="tab-page hidden" id="tab-refs">
+            <div class="refs-actions">
+              <button class="btn small" id="btnFetchReferences" data-i18n="📤 抓取引用（参考文献）" data-i18n-title="解析参考文献段落，经 DOI / arXiv / 标题网络检索匹配进库" title="解析参考文献段落，经 DOI / arXiv / 标题网络检索匹配进库">📤 抓取引用（参考文献）</button>
+              <button class="btn small" id="btnFetchCitations" data-i18n="📥 抓取被引" data-i18n-title="从 Semantic Scholar 抓取谁引用了本文（失败自动回退 OpenAlex）" title="从 Semantic Scholar 抓取谁引用了本文（失败自动回退 OpenAlex）">📥 抓取被引</button>
+              <button class="btn small" id="btnAutoMatch" data-i18n="🧩 离线匹配" data-i18n-title="解析参考文献段落，与库内论文离线匹配" title="解析参考文献段落，与库内论文离线匹配">🧩 离线匹配</button>
+              <button class="btn small" id="btnManualLink" data-i18n="➕ 手动关联" data-i18n-title="手动添加“本文引用了库内某论文”" title="手动添加“本文引用了库内某论文”">➕ 手动关联</button>
+            </div>
+            <div id="refsProgress" class="refs-progress hidden">
+              <div class="rp-head">
+                <span id="rpStage">抓取中</span>
+                <span id="rpCount"></span>
+              </div>
+              <div class="rp-bar"><div class="rp-fill" id="rpFill"></div></div>
+              <div class="rp-item" id="rpItem"></div>
+            </div>
+            <div id="refsMsg" class="refs-msg"></div>
+            <details id="refsUnresolvedWrap" class="refs-unresolved hidden">
+              <summary id="refsUnresolvedSummary"></summary>
+              <div id="refsUnresolvedList"></div>
+            </details>
+            <h4 class="ref-h">
+              <span><span data-i18n="📤 本文引用的（参考文献）">📤 本文引用的（参考文献）</span><span class="badge" id="refOutCount">0</span></span>
+              <button class="btn small hidden" id="btnDlAllOut" data-i18n="⏬ 全部下载" data-i18n-title="一键下载全部未入库参考文献（arXiv / 开放获取来源）" title="一键下载全部未入库参考文献（arXiv / 开放获取来源）">⏬ 全部下载</button>
+            </h4>
+            <div id="refOutList" class="ref-list"></div>
+            <div id="refOutExt" class="ref-list ext"></div>
+            <h4 class="ref-h">
+              <span><span data-i18n="📥 引用本文的（被引）">📥 引用本文的（被引）</span><span class="badge" id="refInCount">0</span></span>
+              <button class="btn small hidden" id="btnDlAllIn" data-i18n="⏬ 全部下载" data-i18n-title="一键下载全部未入库被引文献（arXiv / 开放获取来源）" title="一键下载全部未入库被引文献（arXiv / 开放获取来源）">⏬ 全部下载</button>
+            </h4>
+            <div id="refInList" class="ref-list"></div>
+            <div id="refInExt" class="ref-list ext"></div>
+          </div>
+          <div class="tab-page hidden" id="tab-search">
+            <div class="search-box">
+              <input id="sideSearchInput" type="search" data-i18n-ph="在本文中搜索…（Ctrl+F）" placeholder="在本文中搜索…（Ctrl+F）">
+              <span id="searchCountLabel" class="search-count"></span>
+            </div>
+            <div id="searchResults" class="search-results"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </div>
+
+  <!-- 选中文本弹出的高亮工具条 -->
+  <div id="selPopup" class="sel-popup hidden">
+    <button class="hl-dot" data-color="#ffe74a" style="background:#ffe74a" data-i18n-title="黄色高亮" title="黄色高亮"></button>
+    <button class="hl-dot" data-color="#7bf1a8" style="background:#7bf1a8" data-i18n-title="绿色高亮" title="绿色高亮"></button>
+    <button class="hl-dot" data-color="#7ac7ff" style="background:#7ac7ff" data-i18n-title="蓝色高亮" title="蓝色高亮"></button>
+    <button class="hl-dot" data-color="#ff9ad5" style="background:#ff9ad5" data-i18n-title="粉色高亮" title="粉色高亮"></button>
+    <button class="hl-dot" data-color="#ffb27a" style="background:#ffb27a" data-i18n-title="橙色高亮" title="橙色高亮"></button>
+    <span class="sep"></span>
+    <button id="selComment" data-i18n-title="高亮并添加批注" title="高亮并添加批注">💬</button>
+    <button id="selCopy" data-i18n-title="复制文本" title="复制文本">⧉</button>
+  </div>
+
+  <!-- 便利贴/批注编辑弹窗 -->
+  <div id="notePopup" class="note-popup hidden">
+    <textarea id="notePopupText" data-i18n-ph="写下你的批注…" placeholder="写下你的批注…"></textarea>
+    <div class="note-popup-actions">
+      <button class="btn small btn-danger" id="notePopupDelete" data-i18n="删除">删除</button>
+      <span class="flex-spacer"></span>
+      <button class="btn small" id="notePopupCancel" data-i18n="取消">取消</button>
+      <button class="btn small btn-primary" id="notePopupSave" data-i18n="保存">保存</button>
+    </div>
+  </div>
+
+  <!-- 统一导入对话框：链接 / 拖拽文件 / 选择文件 -->
+  <div id="importModal" class="modal hidden">
+    <div class="modal-card">
+      <h3 data-i18n="📥 导入论文">📥 导入论文</h3>
+      <div id="importDrop" class="import-drop" tabindex="0">
+        <div class="import-drop-icon">📂</div>
+        <div data-i18n="把 PDF 拖到这里，或点击选择文件">把 PDF 拖到这里，或点击选择文件</div>
+        <div class="import-drop-sub" data-i18n="支持多选；内容相同的论文会自动复用，疑似重复会请你确认">支持多选；内容相同的论文会自动复用，疑似重复会请你确认</div>
+      </div>
+      <p class="modal-tip" style="margin-top:12px"><span data-i18n="或粘贴链接（PDF 直链 / arXiv 摘要页，每行一个）：">或粘贴链接（PDF 直链 / arXiv 摘要页，每行一个）：</span></p>
+      <textarea id="urlInput" rows="3" placeholder="https://arxiv.org/abs/1706.03762&#10;https://example.org/paper.pdf"></textarea>
+      <div id="urlProgress" class="url-progress hidden"></div>
+      <div class="modal-actions">
+        <button class="btn" id="importCancel" data-i18n="取消">取消</button>
+        <button class="btn btn-primary" id="importGo" data-i18n="开始导入">开始导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 库外发现：经典先驱 / 衍生新作（基于全库参考文献与被引重叠） -->
+  <div id="discoverModal" class="modal hidden">
+    <div class="modal-card discover-card">
+      <h3 data-i18n="🧭 库外发现">🧭 库外发现</h3>
+      <p class="modal-tip" data-i18n="汇总整个论文库的参考文献与被引重叠，找出库外的高关联论文。">汇总整个论文库的参考文献与被引重叠，找出库外的高关联论文。</p>
+      <div class="disc-cols">
+        <div class="disc-col">
+          <h4><span data-i18n="🏛 经典先驱">🏛 经典先驱</span><span class="disc-hint" data-i18n="被库内多篇共同引用">被库内多篇共同引用</span></h4>
+          <div class="disc-list" id="discPriorList"></div>
+        </div>
+        <div class="disc-col">
+          <h4><span data-i18n="🌱 衍生新作">🌱 衍生新作</span><span class="disc-hint" data-i18n="同时引用库内多篇">同时引用库内多篇</span></h4>
+          <div class="disc-list" id="discDerivativeList"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="discoverClose" data-i18n="关闭">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 手动关联对话框 -->
+  <div id="linkModal" class="modal hidden">
+    <div class="modal-card">
+      <h3 data-i18n="➕ 添加引用关联">➕ 添加引用关联</h3>
+      <p class="modal-tip" id="linkModalTip" data-i18n="选择当前论文引用的论文：">选择当前论文引用的论文：</p>
+      <input id="linkSearch" type="search" data-i18n-ph="搜索库内论文…" placeholder="搜索库内论文…">
+      <div id="linkCandidates" class="link-candidates"></div>
+      <div class="modal-actions">
+        <button class="btn" id="linkCancel" data-i18n="取消">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新建论文库对话框 -->
+  <div id="libModal" class="modal hidden">
+    <div class="modal-card">
+      <h3 data-i18n="📚 新建论文库">📚 新建论文库</h3>
+      <p class="modal-tip" data-i18n="不同论文库共享同一论文存储：同一篇论文只保存一份，跨库复用。">不同论文库共享同一论文存储：同一篇论文只保存一份，跨库复用。</p>
+      <input id="libNameInput" type="text" data-i18n-ph="论文库名称，如：Transformer 精读" placeholder="论文库名称，如：Transformer 精读">
+      <textarea id="libDescInput" rows="2" data-i18n-ph="简介（可选）：这个库收录什么主题的论文？" placeholder="简介（可选）：这个库收录什么主题的论文？" style="margin-top:8px"></textarea>
+      <div class="lib-emoji-label" data-i18n="标志图标（可选）">标志图标（可选）</div>
+      <div id="libEmojiRow" class="lib-emoji-row"></div>
+      <div class="modal-actions">
+        <button class="btn" id="libCancel" data-i18n="取消">取消</button>
+        <button class="btn btn-primary" id="libCreate" data-i18n="创建">创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 删除论文库确认对话框：输入完整名称才允许删除 -->
+  <div id="libDeleteModal" class="modal hidden">
+    <div class="modal-card">
+      <h3 data-i18n="🗑 删除论文库">🗑 删除论文库</h3>
+      <p class="modal-tip" id="libDeleteTip"></p>
+      <input id="libDeleteInput" type="text" autocomplete="off">
+      <div class="modal-actions">
+        <button class="btn" id="libDeleteCancel" data-i18n="取消">取消</button>
+        <button class="btn btn-danger" id="libDeleteGo" disabled data-i18n="永久删除">永久删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入冲突确认对话框 -->
+  <div id="conflictModal" class="modal hidden">
+    <div class="modal-card">
+      <h3 data-i18n="⚠️ 发现疑似重复论文">⚠️ 发现疑似重复论文</h3>
+      <p class="modal-tip" id="conflictTip"></p>
+      <div id="conflictList" class="link-candidates"></div>
+      <div class="modal-actions">
+        <button class="btn" id="conflictCancel" data-i18n="取消导入">取消导入</button>
+        <button class="btn" id="conflictNew" data-i18n="作为新论文导入">作为新论文导入</button>
+        <button class="btn btn-primary" id="conflictMerge" data-i18n="使用已有论文">使用已有论文</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- 论文库标志 emoji 选择弹层 -->
+  <div id="emojiPicker" class="emoji-picker hidden"></div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
