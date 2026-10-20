@@ -8,6 +8,8 @@ release*/
 # 自测产物（README 截图统一放 README.assets/，可追溯）
 .selftest-data/
 .selftest-data2/
+.apitest-data/
+.mcptest-data/
 selftest-report.json
 shots/
 

@@ -6,11 +6,11 @@ const path = require('path');
 
 const mcpJsonPath = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
   'kimi-desktop', 'daimon-share', 'daimon', 'runtime', 'kimi-code', 'home', 'mcp.json');
-const registered = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8')).mcpServers.papergraph;
+const registered = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8')).mcpServers.paperweave;
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
-delete env.PAPERGRAPH_AGENT_API_JSON;
+delete env.PAPERWEAVE_AGENT_API_JSON;
 
 const child = spawn(registered.command, registered.args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
 child.stderr.on('data', () => {});
@@ -47,7 +47,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   await req('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'kimi', version: '2.0' } });
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 
-  const papers = await call('papergraph_list_papers');
+  const papers = await call('paperweave_list_papers');
   const targets = papers.filter(p => /WAM/i.test(p.title));
   console.log('目标论文:', targets.map(t => t.title.slice(0, 50)).join(' | '));
 
@@ -55,13 +55,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     console.log('\n== ' + p.title.slice(0, 60) + ' ==');
     console.log('  DOI:', p.doi || '(无)');
     // 离线匹配先行（不依赖网络）
-    const m = await call('papergraph_auto_match_refs', { paperId: p.id });
+    const m = await call('paperweave_auto_match_refs', { paperId: p.id });
     if (m.__error) console.log('  离线匹配:', m.__error);
     else console.log(`  离线匹配: 识别 ${m.matched} 篇，新增 ${m.added} 条`);
     // 在线抓取，429 时限流重试
     let done = false;
     for (let attempt = 1; attempt <= 3 && !done; attempt++) {
-      const r = await call('papergraph_fetch_refs', { paperId: p.id });
+      const r = await call('paperweave_fetch_refs', { paperId: p.id });
       if (r.__error) {
         console.log(`  在线抓取(第${attempt}次):`, r.__error);
         if (/429|超时|网络/.test(r.__error) && attempt < 3) { console.log('  等待 20s 后重试…'); await sleep(20000); continue; }
@@ -74,7 +74,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   }
 
   // 最终图谱状态
-  const g = await call('papergraph_get_graph');
+  const g = await call('paperweave_get_graph');
   console.log(`\n最终图谱: ${g.nodes.length} 节点 / ${g.edges.length} 边`);
   for (const t of targets) {
     const refs = g.edges.filter(e => e.from === t.id);

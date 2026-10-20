@@ -1,4 +1,4 @@
-// PaperGraph PDF 阅读器：pdf.js 渲染 + 文本层高亮 + 便利贴
+// PaperWeave PDF 阅读器：pdf.js 渲染 + 文本层高亮 + 便利贴
 import * as pdfjs from 'pdfjs';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdfjs/pdf.worker.mjs', import.meta.url).href;

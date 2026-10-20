@@ -1,4 +1,4 @@
-// PaperGraph 业务服务层：供 IPC 与 Agent HTTP API 共用
+// PaperWeave 业务服务层：供 IPC 与 Agent HTTP API 共用
 const path = require('path');
 const fs = require('fs');
 const { net } = require('electron');
@@ -41,8 +41,8 @@ function createService(store, opts = {}) {
 
   const pub = (p) => ({ ...p, refText: undefined });
   // 下载/导入后自动引用解析：后台串行队列，静默补全引用关系与未入库条目
-  // 可用 PAPERGRAPH_AUTOFETCH=0 关闭（测试环境默认关闭，避免网络不确定性）
-  const autoFetchEnabled = process.env.PAPERGRAPH_AUTOFETCH !== '0' && process.env.PAPERGRAPH_SELFTEST !== '1';
+  // 可用 PAPERWEAVE_AUTOFETCH=0 关闭（测试环境默认关闭，避免网络不确定性）
+  const autoFetchEnabled = process.env.PAPERWEAVE_AUTOFETCH !== '0' && process.env.PAPERWEAVE_SELFTEST !== '1';
   const autoQueue = [];
   let autoRunning = false;
   async function autoFetchWorker() {
@@ -166,7 +166,7 @@ function createService(store, opts = {}) {
   async function importFromUrl(url, opts = {}) {
     const finalUrl = normalizePaperUrl(url);
     const res = await net.fetch(finalUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 PaperGraph/0.3' },
+      headers: { 'User-Agent': 'Mozilla/5.0 PaperWeave/0.3' },
       redirect: 'follow',
     });
     if (!res.ok) throw new Error('下载失败：HTTP ' + res.status);

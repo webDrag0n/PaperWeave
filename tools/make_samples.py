@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成 PaperGraph 示例论文 PDF（带 DOI、摘要、互相引用的参考文献段落）"""
+"""生成 PaperWeave 示例论文 PDF（带 DOI、摘要、互相引用的参考文献段落）"""
 import os
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas

@@ -1,5 +1,5 @@
-// PaperGraph Agent HTTP API：内嵌在本地的智能体操作接口
-// 默认监听 127.0.0.1:24680（占用时自动递增），除 /api/ping 外均需 X-PaperGraph-Token 鉴权
+// PaperWeave Agent HTTP API：内嵌在本地的智能体操作接口
+// 默认监听 127.0.0.1:24680（占用时自动递增），除 /api/ping 外均需 X-PaperWeave-Token 鉴权
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -39,11 +39,11 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
 
     // 公共探活
     if (u.pathname === '/api/ping') {
-      return json(res, 200, { ok: true, name: 'PaperGraph', version: appVersion, api: 4 });
+      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 4 });
     }
     // 鉴权
-    if (req.headers['x-papergraph-token'] !== token) {
-      return json(res, 401, { ok: false, error: '缺少或错误的 X-PaperGraph-Token' });
+    if (req.headers['x-paperweave-token'] !== token) {
+      return json(res, 401, { ok: false, error: '缺少或错误的 X-PaperWeave-Token' });
     }
 
     const m = req.method;
@@ -287,10 +287,10 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
 
 // 写入连接信息文件（数据目录 + 尽可能 exe 同目录）
 function writeConnectionInfo({ dataDir, exeDir, port, token, version }) {
-  const info = { api: 'PaperGraph Agent API', version, port, token, baseUrl: `http://127.0.0.1:${port}`, pid: process.pid, startedAt: new Date().toISOString() };
+  const info = { api: 'PaperWeave Agent API', version, port, token, baseUrl: `http://127.0.0.1:${port}`, pid: process.pid, startedAt: new Date().toISOString() };
   const text = JSON.stringify(info, null, 2);
   const targets = [path.join(dataDir, 'agent-api.json')];
-  if (exeDir) targets.push(path.join(exeDir, 'papergraph-agent-api.json'));
+  if (exeDir) targets.push(path.join(exeDir, 'paperweave-agent-api.json'));
   const written = [];
   for (const t of targets) {
     try { fs.writeFileSync(t, text); written.push(t); } catch (_) {}

@@ -10,9 +10,9 @@ if (process.env.ELECTRON_RUN_AS_NODE && fs.existsSync(standalone)) nodeBin = sta
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
-delete env.PAPERGRAPH_AGENT_API_JSON;
+delete env.PAPERWEAVE_AGENT_API_JSON;
 
-const child = spawn(nodeBin, [path.join(ROOT, 'mcp', 'papergraph-mcp.js')], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+const child = spawn(nodeBin, [path.join(ROOT, 'mcp', 'paperweave-mcp.js')], { env, stdio: ['pipe', 'pipe', 'pipe'] });
 let buf = '';
 const pending = new Map();
 child.stdout.setEncoding('utf-8');
@@ -46,14 +46,14 @@ const call = async (name, args) => {
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
   const files = ['attention.pdf', 'bert.pdf', 'gpt.pdf', 'vit.pdf', 's2s.pdf', 'resnet.pdf']
     .map(f => path.join(ROOT, 'assets', 'samples', f));
-  const r = await call('papergraph_import_path', { paths: files });
+  const r = await call('paperweave_import_path', { paths: files });
   console.log('导入:', r.filter(x => x.paper && !x.duplicate).length, '篇；去重:', r.filter(x => x.duplicate).length, '篇');
-  const papers = await call('papergraph_list_papers');
+  const papers = await call('paperweave_list_papers');
   for (const p of papers) {
-    try { await call('papergraph_auto_match_refs', { paperId: p.id }); }
+    try { await call('paperweave_auto_match_refs', { paperId: p.id }); }
     catch (e) { console.log('跳过（无参考文献段落）:', p.title.slice(0, 40)); }
   }
-  const g = await call('papergraph_get_graph');
+  const g = await call('paperweave_get_graph');
   console.log('图谱:', g.nodes.length, '节点,', g.edges.length, '条引用边');
   child.kill();
   process.exit(0);

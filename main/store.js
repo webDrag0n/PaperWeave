@@ -1,4 +1,4 @@
-// PaperGraph 数据存储（0.8.0 多论文库架构）：
+// PaperWeave 数据存储（0.8.0 多论文库架构）：
 //   data.json              应用级：{ agentToken, agentPort, libraries[], currentLibraryId }
 //   papers.json            全局论文注册表：每篇论文唯一 id（元数据/评星/笔记/未入库引用都在这里）
 //   annotations.json       全局批注：{ paperId: [...] }
@@ -9,7 +9,7 @@ const path = require('path');
 
 class Store {
   constructor(rootDir) {
-    this.rootDir = rootDir;                       // userData/papergraph-data
+    this.rootDir = rootDir;                       // userData/paperweave-data
     this.libraryDir = path.join(rootDir, 'library'); // PDF 文件库（全局共享）
     this.libsDir = path.join(rootDir, 'libraries');
     this.dataFile = path.join(rootDir, 'data.json');
@@ -43,7 +43,7 @@ class Store {
       // ---- 旧单库结构迁移（0.7.x 及之前） ----
       this.papers = meta.papers;
       this.annotations = meta.annotations && typeof meta.annotations === 'object' ? meta.annotations : {};
-      const lib = { id: 'lib_default', name: 'New Graph', paperIds: this.papers.map(p => p.id), links: Array.isArray(meta.links) ? meta.links : [], createdAt: Date.now() };
+      const lib = { id: 'lib_default', name: 'New Weave', paperIds: this.papers.map(p => p.id), links: Array.isArray(meta.links) ? meta.links : [], createdAt: Date.now() };
       this.meta = {
         agentToken: meta.agentToken,
         agentPort: meta.agentPort,
@@ -65,9 +65,9 @@ class Store {
     this.papers = Array.isArray(papersData.papers) ? papersData.papers : [];
     const anns = this._readJson(this.annotsFile, { annotations: {} });
     this.annotations = anns.annotations && typeof anns.annotations === 'object' ? anns.annotations : {};
-    // 首个库自动创建（任何语言下默认名都是 "New Graph"）
+    // 首个库自动创建（任何语言下默认名都是 "New Weave"）
     if (!this.meta.libraries.length) {
-      const lib = { id: 'lib_default', name: 'New Graph', desc: '', pinned: false, createdAt: Date.now() };
+      const lib = { id: 'lib_default', name: 'New Weave', desc: '', pinned: false, createdAt: Date.now() };
       this.meta.libraries = [{ id: lib.id, name: lib.name, desc: '', pinned: false, createdAt: lib.createdAt }];
       this.meta.currentLibraryId = lib.id;
       this.saveMeta();
@@ -120,7 +120,7 @@ class Store {
   getLibrary(id) { return this.meta.libraries.find(l => l.id === id) || null; }
   createLibrary(name, desc, icon) {
     const ic = (typeof icon === 'string' ? icon : '').trim().slice(0, 8);
-    const lib = { id: 'lib_' + Math.random().toString(36).slice(2, 10), name: name || 'New Graph', desc: desc || '', icon: ic, pinned: false, createdAt: Date.now() };
+    const lib = { id: 'lib_' + Math.random().toString(36).slice(2, 10), name: name || 'New Weave', desc: desc || '', icon: ic, pinned: false, createdAt: Date.now() };
     this.meta.libraries.push({ id: lib.id, name: lib.name, desc: lib.desc, icon: ic, pinned: false, createdAt: lib.createdAt });
     this._libsCache.set(lib.id, { id: lib.id, name: lib.name, paperIds: [], links: [] });
     this.saveMeta();

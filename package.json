@@ -1,9 +1,9 @@
 {
-  "name": "papergraph",
-  "version": "0.9.0",
-  "description": "PaperGraph - lightweight cross-platform paper reader with 3D citation graph",
+  "name": "paperweave",
+  "version": "1.0.0",
+  "description": "PaperWeave - lightweight cross-platform paper reader with 3D citation graph",
   "main": "main/main.js",
-  "author": "PaperGraph",
+  "author": "PaperWeave",
   "license": "MIT",
   "type": "commonjs",
   "scripts": {
@@ -20,8 +20,8 @@
     "mcptest": "node tools/mcp-test.js"
   },
   "build": {
-    "appId": "com.papergraph.app",
-    "productName": "PaperGraph",
+    "appId": "com.paperweave.app",
+    "productName": "PaperWeave",
     "directories": {
       "output": "release",
       "buildResources": "assets"
@@ -40,8 +40,8 @@
         "to": "AGENTS.md"
       },
       {
-        "from": "mcp/papergraph-mcp.js",
-        "to": "papergraph-mcp.js"
+        "from": "mcp/paperweave-mcp.js",
+        "to": "paperweave-mcp.js"
       }
     ],
     "win": {
@@ -53,11 +53,11 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "PaperGraph",
-      "artifactName": "PaperGraph-${version}-win-${arch}-setup.${ext}"
+      "shortcutName": "PaperWeave",
+      "artifactName": "PaperWeave-${version}-win-${arch}-setup.${ext}"
     },
     "portable": {
-      "artifactName": "PaperGraph-${version}-win-${arch}-portable.${ext}"
+      "artifactName": "PaperWeave-${version}-win-${arch}-portable.${ext}"
     },
     "mac": {
       "target": [
@@ -65,7 +65,7 @@
         "zip"
       ],
       "category": "public.app-category.productivity",
-      "artifactName": "PaperGraph-${version}-mac-${arch}.${ext}"
+      "artifactName": "PaperWeave-${version}-mac-${arch}.${ext}"
     },
     "linux": {
       "target": [
@@ -73,7 +73,7 @@
         "deb"
       ],
       "category": "Office",
-      "artifactName": "PaperGraph-${version}-linux-${arch}.${ext}"
+      "artifactName": "PaperWeave-${version}-linux-${arch}.${ext}"
     }
   },
   "dependencies": {

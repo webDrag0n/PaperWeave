@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const info = JSON.parse(fs.readFileSync(
-  path.join(process.env.APPDATA, 'papergraph', 'papergraph-data', 'agent-api.json'), 'utf-8'));
+  path.join(process.env.APPDATA, 'paperweave', 'paperweave-data', 'agent-api.json'), 'utf-8'));
 
 function req(method, p, body) {
   return new Promise((resolve, reject) => {
@@ -12,7 +12,7 @@ function req(method, p, body) {
     const u = new URL(info.baseUrl + p);
     const r = http.request({
       hostname: u.hostname, port: u.port, path: u.pathname, method,
-      headers: { 'Content-Type': 'application/json', 'X-PaperGraph-Token': info.token },
+      headers: { 'Content-Type': 'application/json', 'X-PaperWeave-Token': info.token },
       timeout: 180000,
     }, (res) => {
       const chunks = [];

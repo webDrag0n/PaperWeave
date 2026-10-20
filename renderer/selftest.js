@@ -1,4 +1,4 @@
-// PaperGraph 自测驱动：在渲染进程中以真实用户操作路径跑完整场景
+// PaperWeave 自测驱动：在渲染进程中以真实用户操作路径跑完整场景
 export async function runSelftest(ctx) {
   const { bridge, state, openReader, showView, refreshData, renderLibrary, refsOf, citesOf } = ctx;
   const results = [];
@@ -528,7 +528,7 @@ export async function runSelftest(ctx) {
 
     // ---------- 11.9 多论文库（左侧面板） ----------
     const libs0 = await bridge.listLibraries();
-    check('默认论文库存在且名为 New Graph', libs0.libraries.length === 1 && libs0.libraries[0].name === 'New Graph', libs0.libraries[0] && libs0.libraries[0].name);
+    check('默认论文库存在且名为 New Weave', libs0.libraries.length === 1 && libs0.libraries[0].name === 'New Weave', libs0.libraries[0] && libs0.libraries[0].name);
     document.querySelector('#btnLibCollapse').click();
     check('论文库面板收起', document.querySelector('#libSidebar').classList.contains('collapsed'));
     document.querySelector('#btnLibToggle').click();
@@ -594,7 +594,7 @@ export async function runSelftest(ctx) {
     await bridge.updateLibrary(libs0.current, { icon: '🤖' });
     await refreshData();
     check('库标志图标持久化', (await bridge.listLibraries()).libraries[0].icon === '🤖');
-    check('banner 显示图标与名称', document.querySelector('#libBannerIcon').textContent === '🤖' && document.querySelector('#libBannerName').textContent === 'New Graph',
+    check('banner 显示图标与名称', document.querySelector('#libBannerIcon').textContent === '🤖' && document.querySelector('#libBannerName').textContent === 'New Weave',
       document.querySelector('#libBannerIcon').textContent + '/' + document.querySelector('#libBannerName').textContent);
     check('折叠栏 emoji 列表已渲染', document.querySelectorAll('#libRailIcons .rail-lib').length === 1);
     // banner 点击编辑简介

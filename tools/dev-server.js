@@ -1,4 +1,4 @@
-// PaperGraph 浏览器预览模式开发服务器（npm run dev）
+// PaperWeave 浏览器预览模式开发服务器（npm run dev）
 // 仅用于预览 UI/联调网页桥接层；桌面功能请用 npm start（Electron）
 const http = require('http');
 const fs = require('fs');
@@ -47,5 +47,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`PaperGraph preview: http://${HOST}:${PORT}/`);
+  console.log(`PaperWeave preview: http://${HOST}:${PORT}/`);
 });

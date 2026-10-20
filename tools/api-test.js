@@ -1,19 +1,19 @@
-// PaperGraph Agent API 端到端测试：以 Agent 视角走完整接口流程
-// 用法：npm run apitest   （可选 PAPERGRAPH_TEST_EXE 指定被测程序）
+// PaperWeave Agent API 端到端测试：以 Agent 视角走完整接口流程
+// 用法：npm run apitest   （可选 PAPERWEAVE_TEST_EXE 指定被测程序）
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
 const ROOT = path.join(__dirname, '..');
-const electron = process.env.PAPERGRAPH_TEST_EXE || require('electron');
+const electron = process.env.PAPERWEAVE_TEST_EXE || require('electron');
 const testDataDir = path.join(ROOT, '.apitest-data');
 try { fs.rmSync(testDataDir, { recursive: true, force: true }); } catch (_) { /* 句柄未释放时由收尾重试清理 */ }
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
-env.PAPERGRAPH_HEADLESS = '1';
-env.PAPERGRAPH_AUTOFETCH = '0'; // 测试期间关闭导入后的自动引用解析，保持结果确定
+env.PAPERWEAVE_HEADLESS = '1';
+env.PAPERWEAVE_AUTOFETCH = '0'; // 测试期间关闭导入后的自动引用解析，保持结果确定
 
 const results = [];
 const check = (name, cond, detail = '') => {
@@ -29,7 +29,7 @@ function req(baseUrl, method, p, body, token, raw = false) {
       hostname: u.hostname, port: u.port, path: u.pathname + u.search, method,
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { 'X-PaperGraph-Token': token } : {}),
+        ...(token ? { 'X-PaperWeave-Token': token } : {}),
         ...(data ? { 'Content-Length': data.length } : {}),
       },
     }, (res) => {
@@ -55,7 +55,7 @@ async function main() {
   let appLog = '';
   child.stdout.on('data', d => { appLog += d; });
 
-  const infoFile = path.join(testDataDir, 'papergraph-data', 'agent-api.json');
+  const infoFile = path.join(testDataDir, 'paperweave-data', 'agent-api.json');
 
   try {
     // 等待连接信息文件出现
@@ -201,7 +201,7 @@ async function main() {
     // ---------- 多论文库（0.8.0+） ----------
     r = await req(base, 'GET', '/api/libraries', null, tk);
     const defaultLibId = r.json.data && r.json.data.current;
-    check('libraries 列表与当前库（默认名 New Graph）', r.json.ok && r.json.data.libraries.length === 1 && !!defaultLibId && r.json.data.libraries[0].name === 'New Graph', JSON.stringify(r.json.data && r.json.data.libraries && r.json.data.libraries[0] && r.json.data.libraries[0].name));
+    check('libraries 列表与当前库（默认名 New Weave）', r.json.ok && r.json.data.libraries.length === 1 && !!defaultLibId && r.json.data.libraries[0].name === 'New Weave', JSON.stringify(r.json.data && r.json.data.libraries && r.json.data.libraries[0] && r.json.data.libraries[0].name));
     r = await req(base, 'POST', '/api/libraries', { name: '综述库', desc: '综述参考' }, tk);
     check('创建论文库并自动切换', r.json.ok && r.json.data.name === '综述库' && r.json.data.desc === '综述参考');
     const reviewLibId = r.json.data.id;

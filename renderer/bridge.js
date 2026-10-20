@@ -1,11 +1,11 @@
-// PaperGraph 桥接层：Electron 下走 IPC，浏览器预览下走 localStorage + IndexedDB
+// PaperWeave 桥接层：Electron 下走 IPC，浏览器预览下走 localStorage + IndexedDB
 // 0.8.0 多论文库：全局论文注册表 + 每库 paperIds/links，内容 hash / DOI / 标题冲突检测
 import { extractPdfInfoWeb } from './pdfmeta.js';
 
 function uid(p = 'p_') { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
 /* ---------------- Web 模式存储 ---------------- */
-const LS_KEY = 'papergraph_data_v1';
+const LS_KEY = 'paperweave_data_v1';
 let webProgressCb = null;
 function loadData() {
   try {
@@ -13,7 +13,7 @@ function loadData() {
     if (raw && Array.isArray(raw.papers)) {
       // 0.8.0 迁移：旧结构 {papers, links, annotations} → 全局注册表 + 默认库
       if (!Array.isArray(raw.libraries)) {
-        raw.libraries = [{ id: 'lib_default', name: 'New Graph', desc: '', icon: '', pinned: false, paperIds: raw.papers.map(p => p.id), links: raw.links || [], createdAt: Date.now() }];
+        raw.libraries = [{ id: 'lib_default', name: 'New Weave', desc: '', icon: '', pinned: false, paperIds: raw.papers.map(p => p.id), links: raw.links || [], createdAt: Date.now() }];
         raw.currentLibraryId = 'lib_default';
         delete raw.links;
       }
@@ -28,7 +28,7 @@ function loadData() {
   } catch (_) {}
   return {
     papers: [],
-    libraries: [{ id: 'lib_default', name: 'New Graph', desc: '', icon: '', pinned: false, paperIds: [], links: [], createdAt: Date.now() }],
+    libraries: [{ id: 'lib_default', name: 'New Weave', desc: '', icon: '', pinned: false, paperIds: [], links: [], createdAt: Date.now() }],
     currentLibraryId: 'lib_default',
     annotations: {},
   };
@@ -46,7 +46,7 @@ const idb = {
   open() {
     if (this.db) return Promise.resolve(this.db);
     return new Promise((res, rej) => {
-      const r = indexedDB.open('papergraph-files', 1);
+      const r = indexedDB.open('paperweave-files', 1);
       r.onupgradeneeded = () => r.result.createObjectStore('files');
       r.onsuccess = () => { this.db = r.result; res(this.db); };
       r.onerror = () => rej(r.error);
@@ -259,7 +259,7 @@ const webBridge = {
   },
   async createLibrary(name, desc, icon) {
     const d = loadData();
-    const lib = { id: 'lib_' + Math.random().toString(36).slice(2, 10), name: name || 'New Graph', desc: desc || '', icon: (typeof icon === 'string' ? icon : '').trim().slice(0, 8), pinned: false, paperIds: [], links: [], createdAt: Date.now() };
+    const lib = { id: 'lib_' + Math.random().toString(36).slice(2, 10), name: name || 'New Weave', desc: desc || '', icon: (typeof icon === 'string' ? icon : '').trim().slice(0, 8), pinned: false, paperIds: [], links: [], createdAt: Date.now() };
     d.libraries.push(lib);
     d.currentLibraryId = lib.id;
     saveData(d);
@@ -488,8 +488,8 @@ const webBridge = {
   // Web 种子示例数据（首次打开预览时载入）
   async seedSamplesIfEmpty() {
     const d = loadData();
-    if (d.papers.length || localStorage.getItem('papergraph_seeded')) return false;
-    localStorage.setItem('papergraph_seeded', '1');
+    if (d.papers.length || localStorage.getItem('paperweave_seeded')) return false;
+    localStorage.setItem('paperweave_seeded', '1');
     try {
       const manifest = await fetch('../assets/samples/index.json').then(r => r.json());
       for (const s of manifest) {
@@ -505,8 +505,8 @@ const webBridge = {
 };
 
 // Electron 模式适配：preload 暴露的就是 Promise API
-const electronBridge = window.papergraph ? {
-  ...window.papergraph,
+const electronBridge = window.paperweave ? {
+  ...window.paperweave,
   importFiles: null, // Electron 拖拽通过 pathForFile + importPaths 处理
   seedSamplesIfEmpty: async () => false,
 } : null;

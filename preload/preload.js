@@ -1,7 +1,7 @@
-// PaperGraph preload：向渲染进程暴露受控 API
+// PaperWeave preload：向渲染进程暴露受控 API
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-contextBridge.exposeInMainWorld('papergraph', {
+contextBridge.exposeInMainWorld('paperweave', {
   isElectron: true,
   libInfo: () => ipcRenderer.invoke('lib:info'),
 

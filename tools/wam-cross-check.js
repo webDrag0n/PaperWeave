@@ -7,11 +7,11 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const mcpJsonPath = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
   'kimi-desktop', 'daimon-share', 'daimon', 'runtime', 'kimi-code', 'home', 'mcp.json');
-const registered = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8')).mcpServers.papergraph;
+const registered = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8')).mcpServers.paperweave;
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
-delete env.PAPERGRAPH_AGENT_API_JSON;
+delete env.PAPERWEAVE_AGENT_API_JSON;
 
 const child = spawn(registered.command, registered.args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
 child.stderr.on('data', () => {});
@@ -61,8 +61,8 @@ async function extractText(pdfPath) {
   await req('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'kimi', version: '2.0' } });
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 
-  const status = await call('papergraph_status');
-  const papers = await call('papergraph_list_papers');
+  const status = await call('paperweave_status');
+  const papers = await call('paperweave_list_papers');
   const zeroWam = papers.find(p => /Zero-WAM/.test(p.title));
   const openWam = papers.find(p => /OpenWAM/.test(p.title));
   if (!zeroWam || !openWam) throw new Error('未找到两篇 WAM 论文');
@@ -87,13 +87,13 @@ async function extractText(pdfPath) {
       const idx = hay.indexOf(titleKey.toLowerCase());
       const ctx = idx >= 0 ? c.text.slice(Math.max(0, idx - 80), idx + 80).replace(/\s+/g, ' ').trim() : '';
       if (ctx) console.log('  证据: …' + ctx + '…');
-      const r = await call('papergraph_add_link', { from: c.from.id, to: c.to.id });
+      const r = await call('paperweave_add_link', { from: c.from.id, to: c.to.id });
       if (r.__error) console.log('  建边失败:', r.__error);
       else { console.log('  ✓ 已通过 MCP 建立引用关联'); added++; }
     }
   }
 
-  const g = await call('papergraph_get_graph');
+  const g = await call('paperweave_get_graph');
   console.log(`\n最终图谱: ${g.nodes.length} 节点 / ${g.edges.length} 边（本次新增 ${added} 条）`);
   child.kill();
   process.exit(0);

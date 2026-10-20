@@ -1,12 +1,14 @@
 <div align="center">
 
-# PaperGraph
+<img src="README.assets/logo.png" alt="PaperWeave Logo" width="128">
 
-**A lightweight, cross-platform desktop paper reader: read, annotate, rate — and turn your library into an explorable 3D citation network.**
+# PaperWeave
+
+**A lightweight, cross-platform desktop paper reader: read, annotate, rate — and weave your library into an explorable 3D citation network.**
 
 [中文文档](README.md)
 
-[![Version](https://img.shields.io/badge/version-0.9.0-4aa3ff)](release/)
+[![Version](https://img.shields.io/badge/version-1.0.0-4aa3ff)](release/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-b678ff)](#-download)
 [![Electron](https://img.shields.io/badge/Electron-33-5b6270)](package.json)
@@ -39,7 +41,7 @@
 
 ## 💡 Introduction
 
-PaperGraph is built for "reading papers + mapping the field". It is more than a PDF reader: imported papers get their citation relations resolved automatically, weaving your library into an interactive 3D citation network. References that are not yet in your library can be downloaded and linked with one click.
+PaperWeave is built for "reading papers + mapping the field". It is more than a PDF reader: imported papers get their citation relations resolved automatically, weaving your library into an interactive 3D citation network. References that are not yet in your library can be downloaded and linked with one click.
 
 One codebase builds for Windows / macOS / Linux. The frontend is plain ES modules with no build step, and agents can take full control of the library via a local HTTP API or the bundled MCP server.
 
@@ -96,13 +98,13 @@ One codebase builds for Windows / macOS / Linux. The frontend is plain ES module
 
 ## 📦 Download
 
-Pre-built artifacts live in [`release/`](release/) (currently v0.9.0):
+Pre-built artifacts live in [`release/`](release/) (currently v1.0.0):
 
 | File | Platform | Notes |
 | --- | --- | --- |
-| `PaperGraph-0.9.0-win-x64-setup.exe` | Windows | NSIS installer (custom install dir) |
-| `PaperGraph-0.9.0-win-x64-portable.exe` | Windows | Portable, no installation required |
-| `PaperGraph-0.9.0-linux-x64.zip` | Linux | Unzip and run `PaperGraph` |
+| `PaperWeave-1.0.0-win-x64-setup.exe` | Windows | NSIS installer (custom install dir) |
+| `PaperWeave-1.0.0-win-x64-portable.exe` | Windows | Portable, no installation required |
+| `PaperWeave-1.0.0-linux-x64.zip` | Linux | Unzip and run `PaperWeave` |
 
 For macOS, build from source (see [Packaging](#-packaging)).
 
@@ -117,7 +119,7 @@ For macOS, build from source (see [Packaging](#-packaging)).
 ### From source
 
 ```bash
-git clone <repo-url> && cd PaperGraph
+git clone <repo-url> && cd PaperWeave
 npm install          # Electron, pdf.js, three.js
 npm start            # Desktop app (Electron)
 npm run dev          # Browser preview at http://localhost:7100/ (sample data auto-loaded)
@@ -132,21 +134,21 @@ npm run dev          # Browser preview at http://localhost:7100/ (sample data au
 
 ## 🤖 Agent integration
 
-PaperGraph offers two agent interfaces (see [`agents/AGENTS.md`](agents/AGENTS.md), API v3):
+PaperWeave offers two agent interfaces (see [`agents/AGENTS.md`](agents/AGENTS.md), API v3):
 
-- **Local HTTP Agent API** (`127.0.0.1:24680`, `X-PaperGraph-Token` auth): library management, import, annotations, notes, citation fetch & download, graph snapshot, live progress polling
-- **MCP stdio server** (`mcp/papergraph-mcp.js`, zero-dependency single file): works with Claude Desktop / Cursor / Kimi etc.; 20 tools mirroring the HTTP API, plus 5 resources and 3 prompt workflow templates (deep-read / survey / import-and-link)
+- **Local HTTP Agent API** (`127.0.0.1:24680`, `X-PaperWeave-Token` auth): library management, import, annotations, notes, citation fetch & download, graph snapshot, live progress polling
+- **MCP stdio server** (`mcp/paperweave-mcp.js`, zero-dependency single file): works with Claude Desktop / Cursor / Kimi etc.; 20 tools mirroring the HTTP API, plus 5 resources and 3 prompt workflow templates (deep-read / survey / import-and-link)
 
 ```jsonc
 // MCP host configuration example
 {
   "mcpServers": {
-    "papergraph": { "command": "node", "args": ["<absolute path to papergraph-mcp.js>"] }
+    "paperweave": { "command": "node", "args": ["<absolute path to paperweave-mcp.js>"] }
   }
 }
 ```
 
-Connection info (port + token) is written to `papergraph-data/agent-api.json` on startup; portable builds also write it next to the exe, along with copies of `AGENTS.md` and `papergraph-mcp.js`.
+Connection info (port + token) is written to `paperweave-data/agent-api.json` on startup; portable builds also write it next to the exe, along with copies of `AGENTS.md` and `paperweave-mcp.js`.
 
 ## 🧪 Testing & quality
 
@@ -180,12 +182,12 @@ npm run dist:mac     # macOS: dmg / zip (must run on macOS, electron-builder lim
 ## 🗂 Data & privacy
 
 - **Fully local-first**: library, annotations, notes and ratings stay on your machine; no telemetry, no cloud sync
-- Desktop data lives in `papergraph/papergraph-data/` under the user-data directory:
+- Desktop data lives in `paperweave/paperweave-data/` under the user-data directory:
   - `data.json` app config & library list; `papers.json` global paper registry; `annotations.json` annotations
   - `libraries/<id>.json` per-library paper ids & citation links; `library/` shared PDF store (content-hash named)
-  - Windows: `C:\Users\<you>\AppData\Roaming\papergraph\papergraph-data\`
-  - macOS: `~/Library/Application Support/papergraph/papergraph-data/`
-  - Linux: `~/.config/papergraph/papergraph-data/`
+  - Windows: `C:\Users\<you>\AppData\Roaming\paperweave\paperweave-data\`
+  - macOS: `~/Library/Application Support/paperweave/paperweave-data/`
+  - Linux: `~/.config/paperweave/paperweave-data/`
 - Browser preview uses localStorage + IndexedDB
 - Citation fetching only talks to public scholarly APIs (Semantic Scholar / OpenAlex / CrossRef / arXiv)
 
@@ -196,11 +198,11 @@ main/       Electron main process: window, import, download, metadata extraction
             citation engine, JSON store, Agent HTTP API
   ├─ service.js     Business service layer (shared by IPC and the Agent API)
   ├─ refs.js        Citation engine: S2/OpenAlex/CrossRef/arXiv, throttling, backoff
-  └─ agent-api.js   Local HTTP interface (127.0.0.1 + X-PaperGraph-Token)
+  └─ agent-api.js   Local HTTP interface (127.0.0.1 + X-PaperWeave-Token)
 preload/    Controlled IPC bridge
 renderer/   Plain ES-module frontend (no build step): library / reader / 3D graph / notes
 agents/     AGENTS.md (Agent API contract, shipped with the app)
-mcp/        papergraph-mcp.js (zero-dependency MCP stdio server)
+mcp/        paperweave-mcp.js (zero-dependency MCP stdio server)
 vendor/     pdf.js and three.js static files (loaded via importmap)
 tools/      Dev server, test runners (selftest / apitest / mcptest), packaging wrapper, sample PDF generator
 ```
@@ -212,10 +214,10 @@ tools/      Dev server, test runners (selftest / apitest / mcptest), packaging w
 ## ❓ FAQ
 
 **Rate limited while fetching citations?**
-Semantic Scholar's unauthenticated quota is a shared pool (~1 req/s) and may 429 at peak times. The app throttles and backs off automatically, falling back to OpenAlex. For a stable quota, set `PAPERGRAPH_S2_API_KEY=<your S2 API key>` before launching (free from Semantic Scholar).
+Semantic Scholar's unauthenticated quota is a shared pool (~1 req/s) and may 429 at peak times. The app throttles and backs off automatically, falling back to OpenAlex. For a stable quota, set `PAPERWEAVE_S2_API_KEY=<your S2 API key>` before launching (free from Semantic Scholar).
 
 **Don't want auto citation resolution on import?**
-Start with `PAPERGRAPH_AUTOFETCH=0`; manual fetch remains available in the "Refs" tab.
+Start with `PAPERWEAVE_AUTOFETCH=0`; manual fetch remains available in the "Refs" tab.
 
 **A reference fails to download?**
 Downloads use arXiv direct links and OpenAlex open-access locations; paywalled papers without OA sources are reported as failed — download manually, import, then click "In library · Link" to connect them.
@@ -241,4 +243,4 @@ Issues and PRs are welcome. Before submitting code:
 
 ## 📄 License
 
-[MIT](LICENSE) © PaperGraph
+[MIT](LICENSE) © PaperWeave

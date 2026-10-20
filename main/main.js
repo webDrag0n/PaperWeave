@@ -1,4 +1,4 @@
-// PaperGraph 主进程入口
+// PaperWeave 主进程入口
 const { app, BrowserWindow, ipcMain, dialog, shell, net, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -13,8 +13,8 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 
-const SELFTEST = process.env.PAPERGRAPH_SELFTEST === '1';
-const HEADLESS = process.env.PAPERGRAPH_HEADLESS === '1';
+const SELFTEST = process.env.PAPERWEAVE_SELFTEST === '1';
+const HEADLESS = process.env.PAPERWEAVE_HEADLESS === '1';
 let store = null;
 let service = null;
 let mainWindow = null;
@@ -56,7 +56,7 @@ function portableExeDir() {
 // 把 Agent 配套文件（AGENTS.md、MCP Server）放到 exe 同目录
 // （便携版即用户要求的"同文件夹"），失败静默（如 Program Files 无写权限）
 function placeAgentsDoc() {
-  const files = ['AGENTS.md', 'papergraph-mcp.js'];
+  const files = ['AGENTS.md', 'paperweave-mcp.js'];
   for (const name of files) {
     try {
       const src = app.isPackaged
@@ -70,7 +70,7 @@ function placeAgentsDoc() {
 }
 
 async function startAgentInterface() {
-  if (process.env.PAPERGRAPH_AGENT_API === '0') return;
+  if (process.env.PAPERWEAVE_AGENT_API === '0') return;
   // 令牌持久化在应用级元数据中，同一安装保持稳定
   if (!store.meta.agentToken) {
     store.meta.agentToken = crypto.randomBytes(16).toString('hex');
@@ -98,7 +98,7 @@ async function startAgentInterface() {
     token,
     version: app.getVersion(),
   });
-  console.log('PaperGraph Agent API listening on http://127.0.0.1:' + started.port, 'info files:', written.join(', '));
+  console.log('PaperWeave Agent API listening on http://127.0.0.1:' + started.port, 'info files:', written.join(', '));
 }
 
 function registerIpc() {
@@ -190,7 +190,7 @@ function createWindow() {
     minWidth: 960,
     minHeight: 620,
     show: !HEADLESS,
-    title: 'PaperGraph',
+    title: 'PaperWeave',
     backgroundColor: '#16181d',
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -201,7 +201,7 @@ function createWindow() {
     },
   });
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.loadURL('app://papergraph/renderer/index.html' + (SELFTEST ? '?selftest=1' : ''));
+  mainWindow.loadURL('app://paperweave/renderer/index.html' + (SELFTEST ? '?selftest=1' : ''));
   if (SELFTEST) {
     mainWindow.webContents.on('console-message', (e, level, msg) => console.log('[renderer]', msg));
     mainWindow.webContents.on('did-fail-load', (e, code, desc, url) => console.log('[main] did-fail-load', code, desc, url));
@@ -209,7 +209,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  // app://papergraph/<path> → 应用目录静态资源
+  // app://paperweave/<path> → 应用目录静态资源
   protocol.handle('app', (req) => {
     try {
       const u = new URL(req.url);
@@ -224,7 +224,13 @@ app.whenReady().then(async () => {
       return new Response('bad request', { status: 400 });
     }
   });
-  store = new Store(path.join(app.getPath('userData'), 'papergraph-data'));
+  // 品牌更名 PaperGraph → PaperWeave：首次启动时迁移旧数据目录，老用户不丢库
+  try {
+    const newRoot = path.join(app.getPath('userData'), 'paperweave-data');
+    const legacyRoot = path.join(path.dirname(app.getPath('userData')), 'papergraph', 'papergraph-data');
+    if (!fs.existsSync(newRoot) && fs.existsSync(legacyRoot)) fs.renameSync(legacyRoot, newRoot);
+  } catch (_) { /* 迁移失败不影响全新启动 */ }
+  store = new Store(path.join(app.getPath('userData'), 'paperweave-data'));
   service = createService(store, { progressFor: (id) => progressEmitter(id) });
   registerIpc();
   placeAgentsDoc();
@@ -244,17 +250,17 @@ app.on('will-quit', () => {
 // 自测模式：渲染进程跑完用例后回写结果
 if (SELFTEST) {
   ipcMain.handle('selftest:report', (e, report) => {
-    const out = process.env.PAPERGRAPH_SELFTEST_OUT || path.join(app.getPath('temp'), 'papergraph-selftest.json');
+    const out = process.env.PAPERWEAVE_SELFTEST_OUT || path.join(app.getPath('temp'), 'paperweave-selftest.json');
     fs.writeFileSync(out, JSON.stringify(report, null, 2));
     console.log('SELFTEST_DONE ' + out);
     setTimeout(() => { app.exit(report && report.ok ? 0 : 1); }, 300);
     return true;
   });
-  ipcMain.handle('selftest:sampleDir', () => process.env.PAPERGRAPH_SAMPLE_DIR || null);
+  ipcMain.handle('selftest:sampleDir', () => process.env.PAPERWEAVE_SAMPLE_DIR || null);
   // 自测辅助：复制样例 PDF 并追加注释字节（内容 hash 不同但提取的 DOI 相同），用于导入冲突用例
   ipcMain.handle('selftest:makeVariant', (e, name) => {
     try {
-      const dir = process.env.PAPERGRAPH_SAMPLE_DIR;
+      const dir = process.env.PAPERWEAVE_SAMPLE_DIR;
       const src = path.join(dir, name);
       const dst = path.join(app.getPath('temp'), '.pg-variant-' + name);
       const buf = fs.readFileSync(src);
@@ -270,7 +276,7 @@ if (SELFTEST) {
       mainWindow.focus();
       await new Promise(r => setTimeout(r, 400));
       const img = await mainWindow.webContents.capturePage();
-      const dir = process.env.PAPERGRAPH_SHOT_DIR || app.getPath('temp');
+      const dir = process.env.PAPERWEAVE_SHOT_DIR || app.getPath('temp');
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, name + '.png'), img.toPNG());
       mainWindow.setAlwaysOnTop(false);

@@ -1,4 +1,4 @@
-// PaperGraph 中英双语 i18n：字典 + t() + DOM 批量应用
+// PaperWeave 中英双语 i18n：字典 + t() + DOM 批量应用
 // 约定：字典以中文字符串为 key；t(zh) 在英文模式下返回译文，中文模式原样返回。
 // 静态元素用 data-i18n（textContent）/ data-i18n-title（title）/ data-i18n-ph（placeholder）标注。
 

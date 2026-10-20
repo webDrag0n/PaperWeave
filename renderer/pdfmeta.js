@@ -1,4 +1,4 @@
-// PaperGraph 网页模式下的 PDF 元数据提取（与主进程 importer.js 同逻辑，基于浏览器 pdf.js）
+// PaperWeave 网页模式下的 PDF 元数据提取（与主进程 importer.js 同逻辑，基于浏览器 pdf.js）
 import * as pdfjs from 'pdfjs';
 
 const DOI_RE = /10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi;

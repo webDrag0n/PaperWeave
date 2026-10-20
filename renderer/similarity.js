@@ -1,4 +1,4 @@
-// PaperGraph 库内相似度计算
+// PaperWeave 库内相似度计算
 // 复刻 Connected Papers 的核心思想（Co-citation × Bibliographic Coupling）：
 // 两篇论文的参考文献（耦合，向后看）与被引名单（同被引，向前看）重叠越多，主题越相近，
 // 即使它们之间没有直接引用关系。

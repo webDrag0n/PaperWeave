@@ -1,4 +1,4 @@
-// PaperGraph 渲染进程主逻辑
+// PaperWeave 渲染进程主逻辑
 import { bridge, isWeb } from './bridge.js';
 import { PdfViewer } from './pdfviewer.js';
 import { GraphView, graphThemePalette } from './graph.js';

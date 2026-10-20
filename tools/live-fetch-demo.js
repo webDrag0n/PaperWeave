@@ -6,11 +6,11 @@ const path = require('path');
 
 const mcpJsonPath = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
   'kimi-desktop', 'daimon-share', 'daimon', 'runtime', 'kimi-code', 'home', 'mcp.json');
-const registered = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8')).mcpServers.papergraph;
+const registered = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8')).mcpServers.paperweave;
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
-delete env.PAPERGRAPH_AGENT_API_JSON;
+delete env.PAPERWEAVE_AGENT_API_JSON;
 
 const child = spawn(registered.command, registered.args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
 child.stderr.on('data', () => {});
@@ -46,10 +46,10 @@ const call = async (name, args) => {
   await req('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'kimi', version: '2.0' } });
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 
-  const before = await call('papergraph_status');
+  const before = await call('paperweave_status');
   console.log(`抓取前: ${before.papers} 篇 / ${before.links} 条边`);
 
-  const papers = await call('papergraph_list_papers');
+  const papers = await call('paperweave_list_papers');
   const targets = [
     papers.find(p => /Zero-WAM/.test(p.title)),
     papers.find(p => /OpenWAM/.test(p.title)),
@@ -57,7 +57,7 @@ const call = async (name, args) => {
   ].filter(Boolean);
 
   for (const p of targets) {
-    const r = await call('papergraph_fetch_refs', { paperId: p.id });
+    const r = await call('paperweave_fetch_refs', { paperId: p.id });
     if (r.__error) {
       console.log(`✗ ${p.title.slice(0, 40)}: ${r.__error}`);
     } else {
@@ -65,10 +65,10 @@ const call = async (name, args) => {
     }
   }
 
-  const after = await call('papergraph_status');
+  const after = await call('paperweave_status');
   console.log(`\n抓取后: ${after.papers} 篇 / ${after.links} 条边（净增 ${after.links - before.links}）`);
 
-  const g = await call('papergraph_get_graph');
+  const g = await call('paperweave_get_graph');
   for (const p of targets) {
     const refs = g.edges.filter(e => e.from === p.id).map(e => (g.nodes.find(n => n.id === e.to) || {}).title);
     const cites = g.edges.filter(e => e.to === p.id).map(e => (g.nodes.find(n => n.id === e.from) || {}).title);

@@ -1,4 +1,4 @@
-// PaperGraph 网页模式下的引用抓取（Semantic Scholar）与本地参考文献模糊匹配
+// PaperWeave 网页模式下的引用抓取（Semantic Scholar）与本地参考文献模糊匹配
 function normTitle(t) { return (t || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ').trim(); }
 
 export function titleSimilarityWeb(a, b) {
@@ -322,7 +322,7 @@ async function getJsonStrict(url) {
 }
 
 async function resolveByDoiWeb(doi) {
-  const r = await getJsonStrict(`https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=papergraph@example.local`);
+  const r = await getJsonStrict(`https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=paperweave@example.local`);
   const w = r.message || {};
   const title = (w.title || [])[0];
   if (!title) return null;
@@ -353,7 +353,7 @@ async function resolveByArxivWeb(arxivId) {
 }
 
 async function resolveByTitleWeb(title) {
-  const q = await getJsonStrict(`https://api.openalex.org/works?search=${encodeURIComponent(title)}&per-page=3&mailto=papergraph@example.local`);
+  const q = await getJsonStrict(`https://api.openalex.org/works?search=${encodeURIComponent(title)}&per-page=3&mailto=paperweave@example.local`);
   const hit = (q.results || []).find(w => titleSimilarityWeb(w.title || w.display_name, title) >= 0.85);
   if (!hit) return null;
   return {
@@ -632,14 +632,14 @@ export async function findRefPdfUrlWeb(ref) {
     || (w.open_access && w.open_access.is_oa && w.open_access.oa_url) || null);
   if (ref.doi && !/^arxiv:/i.test(ref.doi)) {
     try {
-      const w = await getJsonStrict(`https://api.openalex.org/works/https://doi.org/${encodeURIComponent(ref.doi)}?mailto=papergraph@example.local`);
+      const w = await getJsonStrict(`https://api.openalex.org/works/https://doi.org/${encodeURIComponent(ref.doi)}?mailto=paperweave@example.local`);
       const u = oaPdf(w);
       if (u) return u;
     } catch (_) {}
   }
   if (ref.title) {
     try {
-      const q = await getJsonStrict(`https://api.openalex.org/works?search=${encodeURIComponent(ref.title)}&per-page=3&mailto=papergraph@example.local`);
+      const q = await getJsonStrict(`https://api.openalex.org/works?search=${encodeURIComponent(ref.title)}&per-page=3&mailto=paperweave@example.local`);
       const hit = (q.results || []).find(w => titleSimilarityWeb(w.title || w.display_name, ref.title) >= 0.85);
       const u = hit && oaPdf(hit);
       if (u) return u;

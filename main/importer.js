@@ -1,4 +1,4 @@
-// PaperGraph 导入器：PDF 元数据提取（pdf.js Node 版）、DOI 识别、参考文献段落提取
+// PaperWeave 导入器：PDF 元数据提取（pdf.js Node 版）、DOI 识别、参考文献段落提取
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');

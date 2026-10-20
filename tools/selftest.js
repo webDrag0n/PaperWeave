@@ -1,19 +1,19 @@
-// PaperGraph 自测运行器：隐藏窗口启动 Electron，跑完整用户场景
+// PaperWeave 自测运行器：隐藏窗口启动 Electron，跑完整用户场景
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
 const ROOT = path.join(__dirname, '..');
-const electron = process.env.PAPERGRAPH_TEST_EXE || require('electron');
+const electron = process.env.PAPERWEAVE_TEST_EXE || require('electron');
 const outFile = path.join(ROOT, 'selftest-report.json');
 if (fs.existsSync(outFile)) fs.unlinkSync(outFile);
 
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
-env.PAPERGRAPH_SELFTEST = '1';
-env.PAPERGRAPH_SELFTEST_OUT = outFile;
-env.PAPERGRAPH_SAMPLE_DIR = path.join(ROOT, 'assets', 'samples');
-env.PAPERGRAPH_SHOT_DIR = path.join(ROOT, 'shots');
+env.PAPERWEAVE_SELFTEST = '1';
+env.PAPERWEAVE_SELFTEST_OUT = outFile;
+env.PAPERWEAVE_SAMPLE_DIR = path.join(ROOT, 'assets', 'samples');
+env.PAPERWEAVE_SHOT_DIR = path.join(ROOT, 'shots');
 fs.mkdirSync(path.join(ROOT, 'shots'), { recursive: true });
 
 const testDataDir = path.join(ROOT, '.selftest-data');

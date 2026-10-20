@@ -32,7 +32,7 @@ if (!platforms.length) platforms.push(builder.Platform.current());
 const archStr = args.includes('--arm64') ? 'arm64' : args.includes('--x64') ? 'x64' : null;
 const targets = builder.createTargets(platforms, null, archStr);
 
-const out0 = () => fs.mkdtempSync(path.join(os.tmpdir(), 'papergraph-dist-'));
+const out0 = () => fs.mkdtempSync(path.join(os.tmpdir(), 'paperweave-dist-'));
 const releaseDir = path.join(__dirname, '..', 'release');
 
 (async () => {

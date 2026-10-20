@@ -1,12 +1,14 @@
 <div align="center">
 
-# PaperGraph
+<img src="README.assets/logo.png" alt="PaperWeave Logo" width="128">
 
-**轻量、跨平台的桌面论文阅读器：阅读、批注、评星，并把论文库变成一张可探索的 3D 引用网络。**
+# PaperWeave
+
+**轻量、跨平台的桌面论文阅读器：阅读、批注、评星，并把论文库织成一张可探索的 3D 引用网络。**
 
 [English](README.en.md) | 中文
 
-[![版本](https://img.shields.io/badge/版本-0.9.0-4aa3ff)](release/)
+[![版本](https://img.shields.io/badge/版本-1.0.0-4aa3ff)](release/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![平台](https://img.shields.io/badge/平台-Windows%20%7C%20macOS%20%7C%20Linux-b678ff)](#-下载)
 [![Electron](https://img.shields.io/badge/Electron-33-5b6270)](package.json)
@@ -39,7 +41,7 @@
 
 ## 💡 简介
 
-PaperGraph 是为「读论文 + 理脉络」而生的桌面工具：它不只是一个 PDF 阅读器——导入论文后会自动解析引用关系，把论文库织成一张可交互的 3D 引用网络；遇到未收录进库的参考文献，可以一键下载入库并自动挂到网络里。
+PaperWeave 是为「读论文 + 理脉络」而生的桌面工具：它不只是一个 PDF 阅读器——导入论文后会自动解析引用关系，把论文库织成一张可交互的 3D 引用网络；遇到未收录进库的参考文献，可以一键下载入库并自动挂到网络里。
 
 同一套源码编译 Windows / macOS / Linux 三平台产物；纯 ES Module 前端无构建步骤，Agent 可通过本地 HTTP API 或 MCP Server 全权接管论文库。
 
@@ -94,13 +96,13 @@ PaperGraph 是为「读论文 + 理脉络」而生的桌面工具：它不只是
 
 ## 📦 下载
 
-预构建产物在 [`release/`](release/)（当前 v0.9.0）：
+预构建产物在 [`release/`](release/)（当前 v1.0.0）：
 
 | 文件 | 平台 | 说明 |
 | --- | --- | --- |
-| `PaperGraph-0.9.0-win-x64-setup.exe` | Windows | NSIS 安装程序（可选安装目录） |
-| `PaperGraph-0.9.0-win-x64-portable.exe` | Windows | 便携版，免安装直接运行 |
-| `PaperGraph-0.9.0-linux-x64.zip` | Linux | 解压后运行 `PaperGraph` |
+| `PaperWeave-1.0.0-win-x64-setup.exe` | Windows | NSIS 安装程序（可选安装目录） |
+| `PaperWeave-1.0.0-win-x64-portable.exe` | Windows | 便携版，免安装直接运行 |
+| `PaperWeave-1.0.0-linux-x64.zip` | Linux | 解压后运行 `PaperWeave` |
 
 macOS 请从源码构建（见[打包发布](#-打包发布)）。
 
@@ -115,7 +117,7 @@ macOS 请从源码构建（见[打包发布](#-打包发布)）。
 ### 从源码运行
 
 ```bash
-git clone <仓库地址> && cd PaperGraph
+git clone <仓库地址> && cd PaperWeave
 npm install          # 安装依赖（Electron、pdf.js、three.js）
 npm start            # 启动桌面应用
 npm run dev          # 浏览器预览模式（http://localhost:7100/，示例数据自动载入）
@@ -130,21 +132,21 @@ npm run dev          # 浏览器预览模式（http://localhost:7100/，示例�
 
 ## 🤖 Agent 集成
 
-PaperGraph 提供两种 Agent 接入方式（详见 [`agents/AGENTS.md`](agents/AGENTS.md)，API v3）：
+PaperWeave 提供两种 Agent 接入方式（详见 [`agents/AGENTS.md`](agents/AGENTS.md)，API v3）：
 
-- **本地 HTTP Agent API**（`127.0.0.1:24680`，`X-PaperGraph-Token` 令牌鉴权）：论文库管理、导入、批注、笔记、引用抓取与下载、图谱读取、实时进度查询
-- **MCP stdio Server**（`mcp/papergraph-mcp.js`，零依赖单文件）：Claude Desktop / Cursor / Kimi 等宿主配置 `node papergraph-mcp.js` 即可接入；20 个工具与 HTTP API 一一对应，另有 5 个 Resources 与 3 个 Prompt 工作流模板（精读 / 综述 / 导入建联）
+- **本地 HTTP Agent API**（`127.0.0.1:24680`，`X-PaperWeave-Token` 令牌鉴权）：论文库管理、导入、批注、笔记、引用抓取与下载、图谱读取、实时进度查询
+- **MCP stdio Server**（`mcp/paperweave-mcp.js`，零依赖单文件）：Claude Desktop / Cursor / Kimi 等宿主配置 `node paperweave-mcp.js` 即可接入；20 个工具与 HTTP API 一一对应，另有 5 个 Resources 与 3 个 Prompt 工作流模板（精读 / 综述 / 导入建联）
 
 ```jsonc
 // MCP 宿主配置示例
 {
   "mcpServers": {
-    "papergraph": { "command": "node", "args": ["<papergraph-mcp.js 的绝对路径>"] }
+    "paperweave": { "command": "node", "args": ["<paperweave-mcp.js 的绝对路径>"] }
   }
 }
 ```
 
-连接信息（端口 + 令牌）在启动后写入 `papergraph-data/agent-api.json`；便携版同时写入 exe 同目录，并自动复制 `AGENTS.md` 与 `papergraph-mcp.js`。
+连接信息（端口 + 令牌）在启动后写入 `paperweave-data/agent-api.json`；便携版同时写入 exe 同目录，并自动复制 `AGENTS.md` 与 `paperweave-mcp.js`。
 
 ## 🧪 测试与质量
 
@@ -180,12 +182,12 @@ npm run dist:mac     # macOS：dmg / zip（需在 macOS 上执行，electron-bui
 ## 🗂 数据与隐私
 
 - **完全本地优先**：论文库、批注、笔记、评星全部存储在本机，无任何遥测与云端上传
-- 桌面版数据位于用户数据目录 `papergraph/papergraph-data/`：
+- 桌面版数据位于用户数据目录 `paperweave/paperweave-data/`：
   - `data.json` 应用级配置与论文库列表；`papers.json` 全局论文注册表；`annotations.json` 批注
   - `libraries/<id>.json` 每个论文库的论文清单与引用关联；`library/` 全局共享 PDF 文件库（内容 hash 命名）
-  - Windows 示例：`C:\Users\<你>\AppData\Roaming\papergraph\papergraph-data\`
-  - macOS：`~/Library/Application Support/papergraph/papergraph-data/`
-  - Linux：`~/.config/papergraph/papergraph-data/`
+  - Windows 示例：`C:\Users\<你>\AppData\Roaming\paperweave\paperweave-data\`
+  - macOS：`~/Library/Application Support/paperweave/paperweave-data/`
+  - Linux：`~/.config/paperweave/paperweave-data/`
 - 浏览器预览版使用 localStorage + IndexedDB
 - 引用抓取仅访问公开学术 API（Semantic Scholar / OpenAlex / CrossRef / arXiv）
 
@@ -195,11 +197,11 @@ npm run dist:mac     # macOS：dmg / zip（需在 macOS 上执行，electron-bui
 main/       Electron 主进程：窗口、导入、下载、元数据提取、引用抓取、JSON 存储、Agent HTTP API
   ├─ service.js     业务服务层（IPC 与 Agent API 共用同一实现）
   ├─ refs.js        引用引擎：S2/OpenAlex/CrossRef/arXiv 多源检索、限流退避、外部引用解析
-  └─ agent-api.js   本地 HTTP 接口（127.0.0.1 + X-PaperGraph-Token）
+  └─ agent-api.js   本地 HTTP 接口（127.0.0.1 + X-PaperWeave-Token）
 preload/    受控 IPC 桥
 renderer/   纯 ES Module 前端（无构建步骤）：论文库 / 阅读器 / 3D 图谱 / 笔记
 agents/     AGENTS.md（Agent 接口契约文档，随包分发）
-mcp/        papergraph-mcp.js（零依赖 MCP stdio Server）
+mcp/        paperweave-mcp.js（零依赖 MCP stdio Server）
 vendor/     pdf.js 与 three.js 静态文件（importmap 直接加载）
 tools/      开发服务器、自测运行器（selftest / apitest / mcptest）、打包包装、示例 PDF 生成
 ```
@@ -211,10 +213,10 @@ tools/      开发服务器、自测运行器（selftest / apitest / mcptest）�
 ## ❓ 常见问题
 
 **抓取引用时被限流 / 失败？**
-Semantic Scholar 未认证配额为共享池（约 1 req/s），高峰期可能 429。应用已内置节流与指数退避，并自动回退 OpenAlex；如需稳定高配额，设置环境变量 `PAPERGRAPH_S2_API_KEY=<你的 S2 API Key>` 后启动（免费申请见 Semantic Scholar 官网）。
+Semantic Scholar 未认证配额为共享池（约 1 req/s），高峰期可能 429。应用已内置节流与指数退避，并自动回退 OpenAlex；如需稳定高配额，设置环境变量 `PAPERWEAVE_S2_API_KEY=<你的 S2 API Key>` 后启动（免费申请见 Semantic Scholar 官网）。
 
 **不希望导入后自动解析引用？**
-设置 `PAPERGRAPH_AUTOFETCH=0` 后启动即可关闭，仍可在「引用」页签手动抓取。
+设置 `PAPERWEAVE_AUTOFETCH=0` 后启动即可关闭，仍可在「引用」页签手动抓取。
 
 **引用下载失败？**
 下载走 arXiv 直链与 OpenAlex 开放获取（OA）位置；无 OA 来源的付费论文会明确报出失败原因，可手动下载后导入，再点「已在库中 · 关联」补建引用边。
@@ -240,4 +242,4 @@ macOS 需在 macOS 上执行 `npm run dist:mac`；Linux 的 AppImage/deb 需在 
 
 ## 📄 许可证
 
-[MIT](LICENSE) © PaperGraph
+[MIT](LICENSE) © PaperWeave

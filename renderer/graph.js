@@ -1,4 +1,4 @@
-// PaperGraph 3D 引用关系图（three.js，自力布局 + 轨道控制）
+// PaperWeave 3D 引用关系图（three.js，自力布局 + 轨道控制）
 // 0.3.0 重做：主题联动配色 / 节点辉光 / 选中边流动箭头 / 未入库引用幽灵节点 / 相机平滑过渡
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';

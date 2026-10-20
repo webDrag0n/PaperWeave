@@ -1,10 +1,10 @@
-// PaperGraph 引用关系：参考文献解析（DOI/arXiv/标题网络检索）+ 被引抓取（Semantic Scholar，含限流退避）+ OpenAlex 回退
+// PaperWeave 引用关系：参考文献解析（DOI/arXiv/标题网络检索）+ 被引抓取（Semantic Scholar，含限流退避）+ OpenAlex 回退
 const https = require('https');
 
 function httpGetJson(url, timeoutMs = 15000, headers = {}, _redirectDepth = 0) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
-      headers: { 'User-Agent': 'PaperGraph/0.2 (paper-library-app)', ...headers },
+      headers: { 'User-Agent': 'PaperWeave/0.2 (paper-library-app)', ...headers },
       timeout: timeoutMs,
     }, res => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -34,7 +34,7 @@ function httpGetJson(url, timeoutMs = 15000, headers = {}, _redirectDepth = 0) {
 function httpGetText(url, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
-      headers: { 'User-Agent': 'PaperGraph/0.1 (paper-library-app)' },
+      headers: { 'User-Agent': 'PaperWeave/0.1 (paper-library-app)' },
       timeout: timeoutMs,
     }, res => {
       if (res.statusCode !== 200) {
@@ -64,7 +64,7 @@ async function s2Throttle() {
 }
 
 async function s2GetJson(url, retries = 2) {
-  const key = process.env.PAPERGRAPH_S2_API_KEY;
+  const key = process.env.PAPERWEAVE_S2_API_KEY;
   for (let attempt = 0; attempt <= retries; attempt++) {
     await s2Throttle();
     try {
@@ -295,7 +295,7 @@ async function fetchSemanticScholar(paper, papers) {
 // OpenAlex：Semantic Scholar 不可用时的回退源（免费、限流宽松）
 // 匹配规则与 S2 相同：DOI/arXiv 精确 + 标题相似度 ≥0.8
 async function fetchOpenAlex(paper, papers) {
-  const mailto = 'papergraph@example.local';
+  const mailto = 'paperweave@example.local';
   let work = null;
 
   // 1) 定位该论文的 OpenAlex work
@@ -414,7 +414,7 @@ function extractRefIdentifiers(entry) {
 async function resolveByDoi(doi) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const r = await httpGetJson(`https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=papergraph@example.local`);
+      const r = await httpGetJson(`https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=paperweave@example.local`);
       const w = r.message || {};
       const title = (w.title || [])[0];
       if (!title) return null;
@@ -486,7 +486,7 @@ async function resolveByS2Match(title) {
 
 // 标题 → OpenAlex 检索解析
 async function resolveByTitle(title) {
-  const q = await httpGetJson(`https://api.openalex.org/works?search=${encodeURIComponent(title)}&per-page=3&mailto=papergraph@example.local`);
+  const q = await httpGetJson(`https://api.openalex.org/works?search=${encodeURIComponent(title)}&per-page=3&mailto=paperweave@example.local`);
   const hit = (q.results || []).find(w => titleSimilarity(w.title || w.display_name, title) >= 0.85);
   if (!hit) return null;
   return {
@@ -857,7 +857,7 @@ async function fetchCitationsOnline(paper, papers, opts = {}) {
 async function findRefPdfUrl(ref) {
   const ax = ref.arxivId || extractArxivId(ref.doi);
   if (ax) return `https://arxiv.org/pdf/${ax}`;
-  const mailto = 'papergraph@example.local';
+  const mailto = 'paperweave@example.local';
   const oaPdf = (w) => w && ((w.best_oa_location && w.best_oa_location.pdf_url)
     || (w.open_access && w.open_access.is_oa && w.open_access.oa_url) || null);
   if (ref.doi && !/^arxiv:/i.test(ref.doi)) {

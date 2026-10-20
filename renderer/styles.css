@@ -1,4 +1,4 @@
-/* PaperGraph 样式：深色学术风（默认）+ 浅色主题 */
+/* PaperWeave 样式：深色学术风（默认）+ 浅色主题 */
 :root {
   --bg: #16181d;
   --bg2: #1d2027;
@@ -68,6 +68,7 @@ button { font-family: inherit; }
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; cursor: pointer; user-select: none; }
 .brand:hover { color: var(--accent); }
+.brand-logo { width: 24px; height: 24px; border-radius: 6px; display: block; }
 .search-wrap { flex: 1; max-width: 520px; }
 #searchInput {
   width: 100%; padding: 8px 14px; border-radius: 20px; border: 1px solid var(--line);
