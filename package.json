@@ -1,6 +1,6 @@
 {
   "name": "paperweave",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "PaperWeave - lightweight cross-platform paper reader with 3D citation graph",
   "main": "main/main.js",
   "author": "PaperWeave",
@@ -14,9 +14,12 @@
     "dist": "node tools/build.js",
     "dist:win": "node tools/build.js --win",
     "dist:mac": "node tools/build.js --mac",
+    "dist:mac:x64": "node tools/build.js --mac --x64",
+    "dist:mac:arm64": "node tools/build.js --mac --arm64",
     "dist:linux": "node tools/build.js --linux",
     "dist:all": "node tools/build.js --win --mac --linux",
     "apitest": "node tools/api-test.js",
+    "exttest": "node tools/ext-api-test.js",
     "mcptest": "node tools/mcp-test.js"
   },
   "build": {
@@ -42,6 +45,10 @@
       {
         "from": "mcp/paperweave-mcp.js",
         "to": "paperweave-mcp.js"
+      },
+      {
+        "from": "extension",
+        "to": "extension"
       }
     ],
     "win": {

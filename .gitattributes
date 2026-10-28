@@ -4,3 +4,4 @@
 *.ico binary
 *.exe binary
 *.zip binary
+*.sh text eol=lf

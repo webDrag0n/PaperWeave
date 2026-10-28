@@ -177,6 +177,15 @@ npm run dist:linux   # Linux: AppImage / deb (run on Linux; cross-build zip work
 npm run dist:mac     # macOS: dmg / zip (must run on macOS, electron-builder limitation)
 ```
 
+**macOS quick build** (after clone / pull; only Node.js 18+ needed, no Xcode):
+
+```bash
+./tools/build-mac.sh         # install deps + build for the current arch (Apple Silicon → arm64)
+./tools/build-mac.sh all     # build both x64 + arm64
+```
+
+Artifacts land in `release/` as `PaperWeave-<version>-mac-<arch>.dmg` and `.zip`. Without an Apple Developer certificate, electron-builder falls back to ad-hoc signing — fine on your own machine; other Mac users must allow the app in System Settings → Privacy & Security. For public distribution, configure signing and notarization (Apple Developer account). If downloading the Electron binary is slow in China, uncomment the `ELECTRON_MIRROR` line in the script.
+
 > **Build tip**: in a Kimi/Electron-hosted terminal, `ELECTRON_RUN_AS_NODE=1` breaks asar packaging — use the bundled standalone Node: `tools/runtime/node-v24.21.0-win-x64/node.exe tools/build.js --win`. If a workspace file watcher holds `app.asar`, add `-c.directories.output=<system temp dir>` and move the artifacts back afterwards.
 
 ## 🗂 Data & privacy

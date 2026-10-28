@@ -175,6 +175,15 @@ npm run dist:linux   # Linux：AppImage / deb（需在 Linux 上执行；Windows
 npm run dist:mac     # macOS：dmg / zip（需在 macOS 上执行，electron-builder 平台限制）
 ```
 
+**macOS 快速构建**（clone / pull 之后，仅需 Node.js 18+，无需 Xcode）：
+
+```bash
+./tools/build-mac.sh         # 安装依赖 + 构建当前架构（Apple Silicon → arm64）
+./tools/build-mac.sh all     # 同时构建 x64 + arm64
+```
+
+产物为 `release/PaperWeave-<版本>-mac-<架构>.dmg` 和 `.zip`。本机未配置 Apple 开发者证书时 electron-builder 会自动 ad-hoc 签名，本机双击即可安装运行；分发给其他 Mac 用户时需对方在「系统设置 → 隐私与安全性」中放行，正式分发需配置签名与公证（Apple Developer 账号）。国内网络下载 Electron 二进制缓慢时，可取消脚本中 `ELECTRON_MIRROR` 一行的注释。
+
 > **打包提示**：在 Kimi / Electron 托管的终端里构建时，环境变量 `ELECTRON_RUN_AS_NODE=1` 会让 asar 打包失败，请使用仓库自带的独立 Node：`tools/runtime/node-v24.21.0-win-x64/node.exe tools/build.js --win`。
 >
 > `tools/build.js` 默认把构建输出放到**系统临时目录**，完成后只把发行物（安装包 / 便携版 / blockmap 等）拷回 `release/`——免安装的 `*-unpacked` 目录不会落进工作区，避免文件监听（Kimi / 编辑器等）长期锁定 `app.asar` 导致下次构建失败。确需免安装目录时用 `npm run pack`，或显式传 `-c.directories.output=<目录>`（这两种情况原样透传给 electron-builder）。
