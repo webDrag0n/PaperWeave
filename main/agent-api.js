@@ -20,9 +20,17 @@ function readBody(req, cap = 64 * 1024 * 1024) {
   });
 }
 
+// CORS：浏览器插件（popup / content script）跨域调用所需；鉴权仍靠 X-PaperWeave-Token
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, X-PaperWeave-Token',
+  'Access-Control-Max-Age': '86400',
+};
+
 function json(res, status, obj) {
   const body = JSON.stringify(obj);
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS });
   res.end(body);
 }
 
@@ -37,9 +45,15 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
     const u = new URL(req.url, 'http://127.0.0.1');
     const parts = u.pathname.split('/').filter(Boolean); // ['api','papers',':id',...]
 
+    // 浏览器预检请求（无鉴权头，直接放行）
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, CORS_HEADERS);
+      return res.end();
+    }
+
     // 公共探活
     if (u.pathname === '/api/ping') {
-      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 4 });
+      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 5 });
     }
     // 鉴权
     if (req.headers['x-paperweave-token'] !== token) {
@@ -125,6 +139,45 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
         }
       }
 
+      // 浏览器插件专用：除下载 URL 外可携带页面提取的元数据（标题/作者/DOI 等），
+      // 入库后只补空白字段，不覆盖 PDF 提取或用户已有内容
+      if (u.pathname === '/api/papers/import-web' && m === 'POST') {
+        const body = JSON.parse((await readBody(req)).toString('utf-8') || '{}');
+        const target = body.pdfUrl || body.url;
+        if (!target) return json(res, 400, { ok: false, error: '需要 url 或 pdfUrl 字段' });
+        try {
+          const opts = { conflictPolicy: body.conflictPolicy || 'auto' };
+          if (typeof body.rating === 'number') opts.rating = body.rating;
+          const r = await service.importFromUrl(target, opts);
+          const paper = r && r.paper ? store.getPaper(r.paper.id) : null;
+          if (paper) {
+            const patch = {};
+            const blank = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
+            if (blank(paper.title) || paper.title === '未命名论文') { if (body.title) patch.title = String(body.title).slice(0, 500); }
+            if (blank(paper.authors) && Array.isArray(body.authors) && body.authors.length) patch.authors = body.authors.map(a => String(a).slice(0, 200)).slice(0, 50);
+            if (blank(paper.year) && body.year) patch.year = String(body.year).slice(0, 10);
+            if (blank(paper.doi) && body.doi) patch.doi = String(body.doi).slice(0, 200);
+            if (blank(paper.abstract) && body.abstract) patch.abstract = String(body.abstract).slice(0, 20000);
+            if (blank(paper.venue) && body.venue) patch.venue = String(body.venue).slice(0, 300);
+            if (Array.isArray(body.tags) && body.tags.length) {
+              patch.tags = [...new Set([...(paper.tags || []), ...body.tags.map(x => String(x).slice(0, 50))])].slice(0, 50);
+            }
+            if (Object.keys(patch).length) store.updatePaper(paper.id, patch);
+          }
+          onChanged();
+          return json(res, 200, {
+            ok: true,
+            data: {
+              paper: paper ? paperPublic(store.getPaper(paper.id)) : (r.paper || null),
+              duplicate: !!r.duplicate,
+              sourcePage: body.url || null,
+            },
+          });
+        } catch (e) {
+          return json(res, 502, { ok: false, error: e.message });
+        }
+      }
+
       if (parts[0] === 'api' && parts[1] === 'papers' && parts[2]) {
         const id = parts[2];
         const paper = store.getPaper(id);
@@ -149,7 +202,7 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
           const fp = store.paperFilePath(paper);
           if (!fp || !fs.existsSync(fp)) return json(res, 404, { ok: false, error: 'PDF 文件缺失' });
           const buf = fs.readFileSync(fp);
-          res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': buf.length });
+          res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': buf.length, ...CORS_HEADERS });
           return res.end(buf);
         }
         if (parts[3] === 'annotations') {

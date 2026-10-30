@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PaperWeave Connector 设置</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="options">
+  <h1><img src="icons/icon-48.png" alt=""><span>PaperWeave Connector</span></h1>
+  <p class="sub" data-zh="把浏览器里的论文一键保存到 PaperWeave 桌面端" data-en="Save papers from your browser into the PaperWeave desktop app">把浏览器里的论文一键保存到 PaperWeave 桌面端</p>
+
+  <div class="field">
+    <label data-zh="服务地址（PaperWeave 桌面端 Agent API）" data-en="Server URL (PaperWeave desktop Agent API)">服务地址（PaperWeave 桌面端 Agent API）</label>
+    <input id="serverUrl" type="text" placeholder="http://127.0.0.1:24680" spellcheck="false">
+  </div>
+  <div class="field">
+    <label data-zh="访问令牌（X-PaperWeave-Token）" data-en="Access token (X-PaperWeave-Token)">访问令牌（X-PaperWeave-Token）</label>
+    <input id="token" type="text" placeholder="32 位十六进制令牌" spellcheck="false" autocomplete="off">
+  </div>
+  <div class="actions">
+    <button id="saveBtn" class="btn btn-primary" data-zh="保存" data-en="Save">保存</button>
+    <button id="testBtn" class="btn" data-zh="测试连接" data-en="Test connection">测试连接</button>
+  </div>
+  <div id="optStatus"></div>
+
+  <div class="help" data-zh="💡 在哪里找到连接信息？打开 PaperWeave 桌面端 → 顶栏「🧩 插件」，即可复制服务地址与访问令牌。桌面端需保持运行，插件才能入库。" data-en="💡 Where to find these? Open the PaperWeave desktop app → “🧩 Add-on” in the top bar to copy the server URL and token. The desktop app must be running for imports to work.">💡 在哪里找到连接信息？打开 PaperWeave 桌面端 → 顶栏「🧩 插件」，即可复制服务地址与访问令牌。桌面端需保持运行，插件才能入库。</div>
+
+  <script src="options.js"></script>
+</body>
+</html>

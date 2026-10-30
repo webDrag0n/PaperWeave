@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PaperWeave Connector</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="popup">
+  <header class="pw-header">
+    <img src="icons/icon-48.png" alt="" class="pw-logo">
+    <span class="pw-brand">PaperWeave</span>
+    <span id="connDot" class="conn-dot" title=""></span>
+  </header>
+
+  <main>
+    <!-- 未配置 -->
+    <section id="setupView" class="hidden">
+      <div class="empty-icon">🧩</div>
+      <p class="empty-text" data-zh="首次使用请先完成连接设置" data-en="Set up the connection first">首次使用请先完成连接设置</p>
+      <button id="openOptions1" class="btn btn-primary" data-zh="⚙ 打开设置" data-en="⚙ Open settings">⚙ 打开设置</button>
+    </section>
+
+    <!-- 识别到论文 -->
+    <section id="paperView" class="hidden">
+      <div class="paper-card">
+        <span id="paperKind" class="kind-badge">arXiv</span>
+        <h2 id="paperTitle" class="paper-title"></h2>
+        <p id="paperAuthors" class="paper-authors"></p>
+        <p id="paperMeta" class="paper-meta"></p>
+      </div>
+      <button id="saveBtn" class="btn btn-primary btn-save" data-zh="📥 保存到 PaperWeave" data-en="📥 Save to PaperWeave">📥 保存到 PaperWeave</button>
+      <div id="resultBox" class="result hidden"></div>
+    </section>
+
+    <!-- 未识别到论文 -->
+    <section id="noPaperView" class="hidden">
+      <div class="empty-icon">📄</div>
+      <p class="empty-text" data-zh="当前页面未识别到论文信息" data-en="No paper detected on this page">当前页面未识别到论文信息</p>
+      <p class="empty-sub" data-zh="支持 arXiv 摘要 / PDF 页面及带 citation 元数据的出版商页面" data-en="Works on arXiv abstract / PDF pages and publisher pages with citation metadata">支持 arXiv 摘要 / PDF 页面及带 citation 元数据的出版商页面</p>
+    </section>
+  </main>
+
+  <footer class="pw-footer">
+    <span id="connStatus" class="conn-status"></span>
+    <button id="openOptions2" class="link-btn" data-zh="⚙ 设置" data-en="⚙ Settings">⚙ 设置</button>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

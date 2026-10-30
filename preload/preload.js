@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('paperweave', {
   importDialog: () => ipcRenderer.invoke('papers:importDialog'),
   importPaths: (paths) => ipcRenderer.invoke('papers:importPaths', paths),
   importUrl: (url) => ipcRenderer.invoke('papers:importUrl', url),
+  // 浏览器插件：连接信息 + 打开插件目录
+  agentConnectionInfo: () => ipcRenderer.invoke('agent:connectionInfo'),
+  openExtensionFolder: () => ipcRenderer.invoke('agent:openExtensionFolder'),
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file); } catch (_) { return null; }
   },

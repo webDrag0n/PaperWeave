@@ -9,6 +9,9 @@
 //    这两种情况原样透传给 electron-builder CLI。
 if (process.versions && process.versions.electron) {
   try { delete process.versions.electron; } catch (_) { process.versions.electron = undefined; }
+  // Electron 托管 node 的 fs 会把 *.asar 路径当压缩包拦截，导致 app.asar 写入时报
+  // "Invalid package"；关闭 asar 拦截后再打包（electron-builder 在同一进程内写 asar）。
+  try { process.noAsar = true; } catch (_) {}
 }
 const path = require('path');
 const fs = require('fs');
@@ -68,5 +71,8 @@ const releaseDir = path.join(__dirname, '..', 'release');
   }
   try { fs.rmSync(out, { recursive: true, force: true }); }
   catch (_) { console.log('[build] 临时目录留待系统清理：' + out); }
+  // 浏览器插件同步进 release/（目录 + zip）
+  try { require('./pack-extension').packExtension(); }
+  catch (e) { console.log('[build] 插件打包跳过：' + e.message); }
   console.log('[build] 完成');
 })().catch(e => { console.error(e); process.exit(1); });

@@ -18,9 +18,11 @@ export class PdfViewer {
     this.baseScale = 1;
     this.stickyMode = false;
     this.hlColor = '#ffe74a';
-    this.pages = []; // { num, wrap, canvas, hlLayer, textLayerEl, iconLayer, viewport1 }
+    // viewport1 是稳定的页面坐标基准；stage 内所有图层共享 renderScale 和同一个 transform。
+    this.pages = []; // { num, wrap, stage, canvas, hlLayer, textLayerEl, iconLayer, viewport, viewport1, renderScale }
     this._selHandler = this._onMouseUp.bind(this);
     this._renderToken = 0;
+    this._zoomCommitTimer = null;
     this._boundPopup = null;
   }
 
@@ -42,11 +44,13 @@ export class PdfViewer {
     this.baseScale = avail / v1.width;
     this.scale = this.baseScale;
 
-    // 页面骨架
+    // 页面骨架：交互缩放只变换 stage，wrap 负责最终布局尺寸和滚动占位。
     for (let n = 1; n <= this.doc.numPages; n++) {
       const wrap = document.createElement('div');
       wrap.className = 'pdf-page';
       wrap.dataset.page = n;
+      const stage = document.createElement('div');
+      stage.className = 'pdf-stage';
       const canvas = document.createElement('canvas');
       const hlLayer = document.createElement('div');
       hlLayer.className = 'hlLayer';
@@ -58,10 +62,14 @@ export class PdfViewer {
       const badge = document.createElement('div');
       badge.className = 'page-num-badge';
       badge.textContent = n + ' / ' + this.doc.numPages;
-      wrap.append(canvas, hlLayer, textLayerEl, iconLayer, badge);
+      stage.append(canvas, hlLayer, textLayerEl, iconLayer);
+      wrap.append(stage, badge);
       wrap.addEventListener('click', (ev) => this._onPageClick(ev, n, wrap));
       this.opts.pagesEl.appendChild(wrap);
-      this.pages.push({ num: n, wrap, canvas, hlLayer, textLayerEl, iconLayer, rendered: false });
+      this.pages.push({
+        num: n, wrap, stage, canvas, hlLayer, textLayerEl, iconLayer,
+        rendered: false, rendering: false, renderScale: this.scale, renderTask: null,
+      });
     }
     document.addEventListener('mouseup', this._selHandler);
     await this.renderAll();
@@ -69,16 +77,23 @@ export class PdfViewer {
 
   async renderAll() {
     const token = ++this._renderToken;
-    // 先为每页测量尺寸（不渲染），占位避免滚动跳动
+    clearTimeout(this._zoomCommitTimer);
+    this._zoomCommitTimer = null;
+    // 只更新布局占位；旧 stage 保持到对应页的新画布和文本层都准备好，避免重绘白闪。
     for (const p of this.pages) {
       const page = await this.doc.getPage(p.num);
-      const viewport = page.getViewport({ scale: this.scale });
-      p.viewport = viewport;
-      p.wrap.style.width = viewport.width + 'px';
-      p.wrap.style.height = viewport.height + 'px';
-      p.canvas.style.width = viewport.width + 'px';
-      p.canvas.style.height = viewport.height + 'px';
+      if (token !== this._renderToken || !this.doc) return;
+      p.viewport1 = page.getViewport({ scale: 1 });
+      p.wrap.style.width = (p.viewport1.width * this.scale) + 'px';
+      p.wrap.style.height = (p.viewport1.height * this.scale) + 'px';
       p.rendered = false;
+      p.rendering = false;
+      p.renderToken = token;
+      if (p.renderTask) {
+        try { p.renderTask.cancel(); } catch (_) {}
+        p.renderTask = null;
+      }
+      this._updatePageTransform(p);
     }
     // 懒渲染：接近视口的页面才渲染，长文档秒开
     if (this._observer) this._observer.disconnect();
@@ -87,24 +102,24 @@ export class PdfViewer {
         if (!en.isIntersecting) continue;
         const p = this.pages.find(x => x.wrap === en.target);
         if (p && !p.rendered && !p.rendering) {
-          p.rendering = true;
-          this._renderPage(p).then(() => {
-            if (token === this._renderToken) this._renderAnnotationsFor(p);
+          this._renderPage(p, token, this.scale).then((ok) => {
+            if (ok && token === this._renderToken) this._renderAnnotationsFor(p);
           });
         }
         this._observer.unobserve(en.target);
       }
     }, { root: this.opts.scrollEl, rootMargin: '600px 0px' });
     for (const p of this.pages) this._observer.observe(p.wrap);
-    // 滚动兜底：某些环境下 IO 回调不及时，直接在滚动时检查
+    // 滚动兜底：某些环境下 IO 回调不及时，直接在滚动时检查；先移除旧监听避免叠加。
+    if (this._scrollFallback) this.opts.scrollEl.removeEventListener('scroll', this._scrollFallback);
     this._scrollFallback = () => this._renderVisiblePages();
     this.opts.scrollEl.addEventListener('scroll', this._scrollFallback);
     // 首屏兜底：立即渲染第一页
     if (this.pages[0] && !this.pages[0].rendered) {
-      await this._renderPage(this.pages[0]);
-      this._observer.unobserve(this.pages[0].wrap);
+      await this._renderPage(this.pages[0], token, this.scale);
+      if (token === this._renderToken) this._observer.unobserve(this.pages[0].wrap);
     }
-    this._renderVisiblePages();
+    if (token === this._renderToken) this._renderVisiblePages();
   }
 
   _renderVisiblePages() {
@@ -114,27 +129,35 @@ export class PdfViewer {
       if (p.rendered || p.rendering) continue;
       const r = p.wrap.getBoundingClientRect();
       if (r.bottom > rootRect.top - margin && r.top < rootRect.bottom + margin) {
-        p.rendering = true;
-        this._renderPage(p).then(() => this._renderAnnotationsFor(p));
+        this._renderPage(p, this._renderToken, this.scale).then((ok) => {
+          if (ok) this._renderAnnotationsFor(p);
+        });
       }
     }
+  }
+
+  _updatePageTransform(p) {
+    if (!p.viewport1) return;
+    const renderScale = p.renderScale || this.scale;
+    p.stage.style.width = (p.viewport1.width * renderScale) + 'px';
+    p.stage.style.height = (p.viewport1.height * renderScale) + 'px';
+    p.stage.style.transform = 'scale(' + (this.scale / renderScale) + ')';
   }
 
   _renderAnnotationsFor(p) {
     p.hlLayer.innerHTML = '';
     p.iconLayer.innerHTML = '';
-    if (!p.viewport) return;
-    const W = p.viewport.width, H = p.viewport.height;
+    if (!p.viewport && !p.viewport1) return;
     for (const a of this.annotations.filter(x => x.page === p.num)) {
       if (a.type === 'highlight' && Array.isArray(a.quads)) {
-        // 渲染时同样做防重叠规范化，兼容升级前已保存的旧高亮
+        // 百分比坐标始终绑定页面本身，交互缩放和高清重绘都不需要重新猜测像素位置。
         for (const q of PdfViewer.normalizeQuads(a.quads)) {
           const box = document.createElement('div');
           box.className = 'hl-box';
-          box.style.left = (q.x * W) + 'px';
-          box.style.top = (q.y * H) + 'px';
-          box.style.width = (q.w * W) + 'px';
-          box.style.height = (q.h * H) + 'px';
+          box.style.left = (q.x * 100) + '%';
+          box.style.top = (q.y * 100) + '%';
+          box.style.width = (q.w * 100) + '%';
+          box.style.height = (q.h * 100) + '%';
           box.style.background = a.color || '#ffe74a';
           box.title = a.comment || a.text || '';
           box.addEventListener('click', (ev) => {
@@ -146,8 +169,8 @@ export class PdfViewer {
       } else if (a.type === 'sticky') {
         const icon = document.createElement('div');
         icon.className = 'sticky-icon';
-        icon.style.left = (a.x * W) + 'px';
-        icon.style.top = (a.y * H) + 'px';
+        icon.style.left = (a.x * 100) + '%';
+        icon.style.top = (a.y * 100) + '%';
         icon.style.pointerEvents = 'auto';
         icon.textContent = '📌';
         icon.title = a.comment || '便利贴';
@@ -160,37 +183,68 @@ export class PdfViewer {
     }
   }
 
-  async _renderPage(p) {
-    const page = await this.doc.getPage(p.num);
-    const viewport = page.getViewport({ scale: this.scale });
-    p.viewport = viewport;
-    p.wrap.style.width = viewport.width + 'px';
-    p.wrap.style.height = viewport.height + 'px';
-    const dpr = window.devicePixelRatio || 1;
-    p.canvas.width = Math.floor(viewport.width * dpr);
-    p.canvas.height = Math.floor(viewport.height * dpr);
-    p.canvas.style.width = viewport.width + 'px';
-    p.canvas.style.height = viewport.height + 'px';
-    const ctx = p.canvas.getContext('2d');
-    await page.render({
-      canvasContext: ctx,
-      viewport,
-      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
-    }).promise;
-    // 文本层
-    p.textLayerEl.innerHTML = '';
-    p.textLayerEl.style.width = viewport.width + 'px';
-    p.textLayerEl.style.height = viewport.height + 'px';
-    // pdf.js 4.x 文本层依赖 --scale-factor 计算字号/坐标，缺失会导致文字层与画布错位、选区不重合
-    p.textLayerEl.style.setProperty('--scale-factor', String(this.scale));
-    p.textLayerEl.style.setProperty('--total-scale-factor', String(this.scale));
-    const tl = new pdfjs.TextLayer({
-      textContentSource: page.streamTextContent(),
-      container: p.textLayerEl,
-      viewport,
-    });
-    await tl.render();
-    p.rendered = true;
+  async _renderPage(p, token = this._renderToken, scale = this.scale) {
+    if (!this.doc || token !== this._renderToken) return false;
+    p.rendering = true;
+    p.renderToken = token;
+    if (p.renderTask) {
+      try { p.renderTask.cancel(); } catch (_) {}
+      p.renderTask = null;
+    }
+    let renderTask = null;
+    try {
+      const page = await this.doc.getPage(p.num);
+      if (token !== this._renderToken || !this.doc) return false;
+      const viewport = page.getViewport({ scale });
+      // 在独立画布和独立文本层上渲染，完成前绝不触碰屏幕上的旧画面。
+      const canvas = document.createElement('canvas');
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = viewport.width + 'px';
+      canvas.style.height = viewport.height + 'px';
+      const ctx = canvas.getContext('2d');
+      renderTask = page.render({
+        canvasContext: ctx,
+        viewport,
+        transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+      });
+      p.renderTask = renderTask;
+      await renderTask.promise;
+      if (token !== this._renderToken || !this.doc) return false;
+
+      const textLayerEl = document.createElement('div');
+      textLayerEl.className = 'textLayer';
+      textLayerEl.style.width = viewport.width + 'px';
+      textLayerEl.style.height = viewport.height + 'px';
+      // CSS 变量必须与本次 viewport 使用同一个 scale，不能读取可能已变化的全局缩放值。
+      textLayerEl.style.setProperty('--scale-factor', String(scale));
+      textLayerEl.style.setProperty('--total-scale-factor', String(scale));
+      const tl = new pdfjs.TextLayer({
+        textContentSource: page.streamTextContent(),
+        container: textLayerEl,
+        viewport,
+      });
+      await tl.render();
+      if (token !== this._renderToken || !this.doc) return false;
+
+      p.canvas = canvas;
+      p.textLayerEl = textLayerEl;
+      p.stage.replaceChildren(canvas, p.hlLayer, textLayerEl, p.iconLayer);
+      p.viewport = viewport;
+      p.renderScale = scale;
+      p.rendered = true;
+      this._updatePageTransform(p);
+      return true;
+    } catch (err) {
+      if (!err || err.name !== 'RenderingCancelledException') {
+        console.error('PDF 页面渲染失败', err);
+      }
+      return false;
+    } finally {
+      if (p.renderTask === renderTask) p.renderTask = null;
+      if (p.renderToken === token) p.rendering = false;
+    }
   }
 
   /* ---------------- 批注渲染 ---------------- */
@@ -231,26 +285,44 @@ export class PdfViewer {
 
     const textLayerEl = pageWrap.querySelector('.textLayer');
     const lr = textLayerEl.getBoundingClientRect();
-    // 浏览器对逐 span 的选区会返回碎片矩形；按行合并成连续的整行 quad，高亮才能连贯且与文字重合
+    // 先按基线聚成行，再在行内按水平间距分段：同栏碎片保持连续，双栏之间的大空白绝不填满。
     const rawRects = [...range.getClientRects()].filter(r => r.width > 1 && r.height > 1);
-    const lineMap = new Map(); // top -> merged line rect
+    const lineBands = [];
     for (const r of rawRects) {
-      let key = null;
-      for (const k of lineMap.keys()) {
-        if (Math.abs(k - r.top) <= Math.max(2, r.height * 0.35)) { key = k; break; }
+      let band = lineBands.find(b => Math.abs(b.top - r.top) <= Math.max(2, Math.max(b.height, r.height) * 0.35));
+      if (!band) {
+        band = { top: r.top, height: r.height, rects: [] };
+        lineBands.push(band);
       }
-      if (key === null) {
-        key = r.top;
-        lineMap.set(key, { left: r.left, top: r.top, right: r.right, bottom: r.bottom });
-      } else {
-        const L = lineMap.get(key);
-        L.left = Math.min(L.left, r.left);
-        L.top = Math.min(L.top, r.top);
-        L.right = Math.max(L.right, r.right);
-        L.bottom = Math.max(L.bottom, r.bottom);
-      }
+      band.rects.push(r);
+      band.top = Math.min(band.top, r.top);
+      band.height = Math.max(band.height, r.height);
     }
-    const rects = PdfViewer.normalizeQuads([...lineMap.values()]
+    const mergedRects = [];
+    for (const band of lineBands) {
+      const sorted = band.rects.sort((a, b) => a.left - b.left);
+      let current = null;
+      for (const r of sorted) {
+        if (!current) {
+          current = { left: r.left, top: r.top, right: r.right, bottom: r.bottom, height: r.height };
+          continue;
+        }
+        const gap = Math.max(0, r.left - current.right);
+        // 阈值随字号和缩放一起变化；词间距可合并，栏间距应保留。
+        const maxGap = Math.max(4, Math.max(current.height, r.height) * 0.75);
+        if (gap <= maxGap) {
+          current.top = Math.min(current.top, r.top);
+          current.right = Math.max(current.right, r.right);
+          current.bottom = Math.max(current.bottom, r.bottom);
+          current.height = Math.max(current.height, r.height);
+        } else {
+          mergedRects.push(current);
+          current = { left: r.left, top: r.top, right: r.right, bottom: r.bottom, height: r.height };
+        }
+      }
+      if (current) mergedRects.push(current);
+    }
+    const rects = PdfViewer.normalizeQuads(mergedRects
       .sort((a, b) => (a.top - b.top) || (a.left - b.left))
       .map(r => ({
         x: Math.max(0, (r.left - lr.left) / lr.width),
@@ -298,16 +370,21 @@ export class PdfViewer {
       .filter(q => q.w > 0.001 && q.h > 0.001)
       .sort((a, b) => (a.y - b.y) || (a.x - b.x));
     for (let i = 1; i < qs.length; i++) {
-      const prev = qs[i - 1], cur = qs[i];
-      const prevBottom = prev.y + prev.h;
-      // 垂直方向有交叠（同一行或相邻行重叠）时收敛边界
-      if (cur.y < prevBottom) {
-        // 水平不重叠的同行 quad 不影响垂直切分
+      const cur = qs[i];
+      // 双栏按 y、x 排序后，同栏上一行不一定紧邻当前项，必须检查此前所有矩形。
+      for (let j = 0; j < i; j++) {
+        const prev = qs[j];
         if (cur.x >= prev.x + prev.w || prev.x >= cur.x + cur.w) continue;
-        const overlap = prevBottom - cur.y;
-        cur.y = prevBottom;
-        cur.h -= overlap;
-        if (cur.h <= 0.001) { qs.splice(i, 1); i--; }
+        const prevBottom = prev.y + prev.h;
+        if (cur.y >= prevBottom) continue;
+        const nextY = Math.max(cur.y, prevBottom);
+        cur.h -= nextY - cur.y;
+        cur.y = nextY;
+        if (cur.h <= 0.001) {
+          qs.splice(i, 1);
+          i--;
+          break;
+        }
       }
     }
     return qs;
@@ -403,9 +480,8 @@ export class PdfViewer {
     const p = this.pages[n - 1];
     if (!p) return false;
     if (!p.rendered && !p.rendering) {
-      p.rendering = true;
-      await this._renderPage(p);
-      this._renderAnnotationsFor(p);
+      const rendered = await this._renderPage(p);
+      if (rendered) this._renderAnnotationsFor(p);
     }
     p.wrap.scrollIntoView({ behavior, block: 'start' });
     return true;
@@ -424,7 +500,8 @@ export class PdfViewer {
     const scrollEl = this.opts.scrollEl;
     const rect = p.wrap.getBoundingClientRect();
     const rootRect = scrollEl.getBoundingClientRect();
-    const yPx = t.yRatio != null ? t.yRatio * p.viewport.height : 0;
+    const pageHeight = p.viewport1 ? p.viewport1.height * this.scale : p.viewport.height;
+    const yPx = t.yRatio != null ? t.yRatio * pageHeight : 0;
     const top = scrollEl.scrollTop + (rect.top - rootRect.top) + yPx - scrollEl.clientHeight * 0.12;
     scrollEl.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     return true;
@@ -495,9 +572,8 @@ export class PdfViewer {
     if (!p) return false;
     if (!hits || !hits.length) { this.jumpToPage(pageNum); return true; }
     if (!p.rendered && !p.rendering) {
-      p.rendering = true;
-      await this._renderPage(p);
-      this._renderAnnotationsFor(p);
+      const rendered = await this._renderPage(p);
+      if (rendered) this._renderAnnotationsFor(p);
     }
     // 计算命中所在的 textContent 项及其行矩形
     const page = await this.doc.getPage(pageNum);
@@ -508,7 +584,7 @@ export class PdfViewer {
     for (const it of tc.items) { offsetOf.push(acc); acc += (it.str || '').length + 1; }
     const vp = p.viewport;
     const Util = pdfjs.Util;
-    let firstTop = null;
+    let firstTopRatio = null;
     for (const hit of hits) {
       // 找到覆盖命中区间的项
       for (let i = 0; i < tc.items.length; i++) {
@@ -517,18 +593,21 @@ export class PdfViewer {
         const it = tc.items[i];
         const t = Util.transform(vp.transform, it.transform);
         const lineH = Math.max(6, (it.height || 10) * vp.scale);
+        const left = t[4] - 1;
+        const top = t[5] - lineH * 0.8;
         const box = document.createElement('div');
         box.className = 'hl-box search-hit';
-        box.style.left = (t[4] - 1) + 'px';
-        box.style.top = (t[5] - lineH * 0.8) + 'px';
-        box.style.width = ((it.width || 5) * vp.scale + 2) + 'px';
-        box.style.height = lineH + 'px';
+        box.style.left = (left / vp.width * 100) + '%';
+        box.style.top = (top / vp.height * 100) + '%';
+        box.style.width = (((it.width || 5) * vp.scale + 2) / vp.width * 100) + '%';
+        box.style.height = (lineH / vp.height * 100) + '%';
         p.hlLayer.appendChild(box);
-        if (firstTop === null) firstTop = t[5] - lineH * 0.8;
+        if (firstTopRatio === null) firstTopRatio = top / vp.height;
       }
     }
-    if (firstTop !== null) {
-      const target = this.opts.scrollEl.scrollTop + p.wrap.getBoundingClientRect().top + firstTop - this.opts.scrollEl.getBoundingClientRect().top - 120;
+    if (firstTopRatio !== null) {
+      const pageHeight = p.viewport1 ? p.viewport1.height * this.scale : vp.height;
+      const target = this.opts.scrollEl.scrollTop + p.wrap.getBoundingClientRect().top + firstTopRatio * pageHeight - this.opts.scrollEl.getBoundingClientRect().top - 120;
       this.opts.scrollEl.scrollTo({ top: target, behavior: 'smooth' });
     }
     setTimeout(() => {
@@ -579,10 +658,66 @@ export class PdfViewer {
     } catch (_) { return null; }
   }
 
-  async zoom(factor) {
-    this.scale = Math.max(0.4, Math.min(4, this.scale * factor));
-    await this.renderAll();
-    return this.scale / this.baseScale;
+  /** 同步更新布局和图层变换，并用同一页面坐标点反算滚动位置，锁住鼠标锚点。 */
+  _applyScale(nextScale, anchor) {
+    if (!this.pages.length) return;
+    const scrollEl = this.opts.scrollEl;
+    const rootRect = scrollEl.getBoundingClientRect();
+    const point = anchor && Number.isFinite(anchor.clientX) && Number.isFinite(anchor.clientY)
+      ? anchor
+      : { clientX: rootRect.left + rootRect.width / 2, clientY: rootRect.top + rootRect.height / 2 };
+
+    // 选离鼠标最近的页面；即使指针位于页间空白，也能用同一相对坐标保持视觉稳定。
+    let anchorPage = null;
+    let anchorRect = null;
+    let bestDistance = Infinity;
+    for (const p of this.pages) {
+      const r = p.wrap.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      const dx = Math.max(r.left - point.clientX, 0, point.clientX - r.right);
+      const dy = Math.max(r.top - point.clientY, 0, point.clientY - r.bottom);
+      const distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        anchorPage = p;
+        anchorRect = r;
+      }
+    }
+    const anchorRatio = anchorPage ? {
+      x: (point.clientX - anchorRect.left) / anchorRect.width,
+      y: (point.clientY - anchorRect.top) / anchorRect.height,
+    } : null;
+
+    this.scale = nextScale;
+    for (const p of this.pages) {
+      if (!p.viewport1) continue;
+      p.wrap.style.width = (p.viewport1.width * nextScale) + 'px';
+      p.wrap.style.height = (p.viewport1.height * nextScale) + 'px';
+      this._updatePageTransform(p);
+    }
+
+    if (anchorPage) {
+      const nextRect = anchorPage.wrap.getBoundingClientRect();
+      const scrollDX = nextRect.left + nextRect.width * anchorRatio.x - point.clientX;
+      const scrollDY = nextRect.top + nextRect.height * anchorRatio.y - point.clientY;
+      scrollEl.scrollLeft += scrollDX;
+      scrollEl.scrollTop += scrollDY;
+    }
+  }
+
+  zoom(factor, anchor) {
+    if (!this.doc) return this.zoomRatio();
+    const nextScale = Math.max(0.4, Math.min(4, this.scale * factor));
+    if (Math.abs(nextScale - this.scale) < 0.00001) return this.zoomRatio();
+    this._applyScale(nextScale, anchor);
+    this.opts.onZoomChange && this.opts.onZoomChange(this.zoomRatio());
+    // 滚轮停顿后再恢复高清渲染；交互过程中只执行轻量、同步的图层变换。
+    clearTimeout(this._zoomCommitTimer);
+    this._zoomCommitTimer = setTimeout(() => {
+      this._zoomCommitTimer = null;
+      if (this.doc) this.renderAll();
+    }, 140);
+    return this.zoomRatio();
   }
   /** 适应宽度：按当前容器宽度重算基准缩放（侧栏收起/展开后同样适用） */
   async fitWidth() {
@@ -590,8 +725,9 @@ export class PdfViewer {
       const avail = Math.max(420, this.opts.scrollEl.clientWidth - 60);
       this.baseScale = avail / this.page1Width;
     }
-    this.scale = this.baseScale;
+    this._applyScale(this.baseScale);
     await this.renderAll();
+    this.opts.onZoomChange && this.opts.onZoomChange(this.zoomRatio());
     return this.zoomRatio();
   }
   zoomRatio() { return this.scale / this.baseScale; }
@@ -601,9 +737,16 @@ export class PdfViewer {
   }
 
   destroy() {
+    ++this._renderToken;
+    clearTimeout(this._zoomCommitTimer);
+    this._zoomCommitTimer = null;
     document.removeEventListener('mouseup', this._selHandler);
     if (this._scrollFallback) this.opts.scrollEl.removeEventListener('scroll', this._scrollFallback);
+    this._scrollFallback = null;
     if (this._observer) this._observer.disconnect();
+    for (const p of this.pages) {
+      if (p.renderTask) { try { p.renderTask.cancel(); } catch (_) {} }
+    }
     this.opts.selPopup.classList.add('hidden');
     this.opts.notePopup.classList.add('hidden');
     this.opts.pagesEl.innerHTML = '';

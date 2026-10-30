@@ -202,12 +202,18 @@ button { font-family: inherit; }
 #btnStickyMode.on { background: var(--accent2); border-color: var(--accent2); color: #fff; }
 
 #readerBody { flex: 1; display: flex; overflow: hidden; }
-#pdfScroll { flex: 1; overflow: auto; background: var(--pdf-bg); padding: 18px 0; transition: background .2s ease; }
-#pdfPages { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-.pdf-page {
-  position: relative; background: #fff; box-shadow: 0 3px 14px rgba(0,0,0,.45);
+#pdfScroll {
+  flex: 1; overflow: auto; background: var(--pdf-bg); padding: 18px 0;
+  transition: background .2s ease; overflow-anchor: none;
 }
-.pdf-page canvas { display: block; }
+#pdfPages { display: flex; flex-direction: column; align-items: center; gap: 14px; overflow-anchor: none; }
+.pdf-page {
+  position: relative; flex: 0 0 auto; background: #fff; box-shadow: 0 3px 14px rgba(0,0,0,.45);
+  overflow-anchor: none;
+}
+/* 所有依赖页面坐标的图层只在 stage 内变换，避免文字、画布和高亮各自缩放产生漂移。 */
+.pdf-stage { position: relative; transform-origin: 0 0; overflow: hidden; line-height: 1; }
+.pdf-page canvas { display: block; user-select: none; }
 .pdf-page .textLayer {
   position: absolute; inset: 0; overflow: hidden; line-height: 1;
   text-align: initial; text-size-adjust: none; forced-color-adjust: none;
@@ -700,6 +706,19 @@ button { font-family: inherit; }
   background: var(--bg3); color: var(--text); font-size: 13px; outline: none; resize: vertical;
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* 浏览器插件连接信息弹窗 */
+.ext-conn { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 10px; }
+.ext-conn-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg3); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+}
+.ext-conn-label { font-size: 12px; color: var(--text-dim); flex: 0 0 auto; }
+.ext-conn-row code {
+  flex: 1 1 auto; font-size: 12px; color: var(--accent); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; user-select: all;
+}
+.ext-steps { margin: 0 0 0 20px; font-size: 12px; color: var(--text-dim); line-height: 1.9; }
 .url-progress { margin-top: 10px; font-size: 12px; color: var(--text-dim); max-height: 140px; overflow: auto; }
 .url-progress .ok { color: var(--ok); }
 .url-progress .err { color: var(--danger); }

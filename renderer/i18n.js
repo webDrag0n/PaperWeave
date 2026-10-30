@@ -332,6 +332,24 @@ const DICT = {
   '第 {n} 页': 'Page {n}',
   '第 {n} 页 · 便利贴': 'Page {n} · sticky note',
   '第 {n} 页 · 高亮': 'Page {n} · highlight',
+
+  /* ---------- 浏览器插件 ---------- */
+  '🧩 插件': '🧩 Add-on',
+  '浏览器插件：浏览 arXiv / PDF 页面时一键入库': 'Browser add-on: one-click import on arXiv / PDF pages',
+  '🧩 浏览器插件（Chrome / Edge）': '🧩 Browser add-on (Chrome / Edge)',
+  '在 arXiv 或论文 PDF 页面点击插件图标，即可把论文一键下载入库（类似 Zotero Connector）。首次使用请按下面步骤安装并填入连接信息。': 'Click the add-on icon on an arXiv or paper PDF page to import it into your library (like Zotero Connector). For first-time setup, follow the steps below with the connection info.',
+  '服务地址': 'Server URL',
+  '访问令牌': 'Access token',
+  '复制': 'Copy',
+  '点击下方按钮打开插件目录（extension 文件夹）': 'Click the button below to open the add-on folder (extension folder)',
+  '浏览器地址栏打开 chrome://extensions（Edge 为 edge://extensions），开启「开发人员模式」': 'Open chrome://extensions (edge://extensions in Edge) and enable "Developer mode"',
+  '点击「加载解压缩的扩展」，选择该 extension 文件夹': 'Click "Load unpacked" and select that extension folder',
+  '点击工具栏插件图标 → ⚙ 设置，粘贴上面的服务地址与访问令牌': 'Click the toolbar add-on icon → ⚙ Settings, then paste the server URL and access token above',
+  '📂 打开插件目录': '📂 Open add-on folder',
+  '已复制到剪贴板': 'Copied to clipboard',
+  '复制失败，请手动选择复制': 'Copy failed; please select and copy manually',
+  '未找到插件目录，请从项目仓库获取 extension 文件夹': 'Add-on folder not found; get the extension folder from the project repository',
+  '（Agent API 未启动）': '(Agent API not running)',
 };
 
 export function t(zh) {

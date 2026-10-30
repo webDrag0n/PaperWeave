@@ -110,6 +110,21 @@ function registerIpc() {
     agentApi: store.data.agentToken ? `http://127.0.0.1:${store.data.agentPort || 24680}` : null,
   }));
 
+  // 浏览器插件连接信息（地址 + 令牌），供「浏览器插件」弹窗展示与复制
+  ipcMain.handle('agent:connectionInfo', () => ({
+    baseUrl: store.meta.agentToken ? `http://127.0.0.1:${store.meta.agentPort || 24680}` : null,
+    port: store.meta.agentPort || null,
+    token: store.meta.agentToken || null,
+    extensionDir: app.isPackaged ? path.join(process.resourcesPath, 'extension') : path.join(app.getAppPath(), 'extension'),
+  }));
+  // 在系统文件管理器中打开浏览器插件目录（加载已解压扩展用）
+  ipcMain.handle('agent:openExtensionFolder', async () => {
+    const dir = app.isPackaged ? path.join(process.resourcesPath, 'extension') : path.join(app.getAppPath(), 'extension');
+    if (!fs.existsSync(dir)) return false;
+    const err = await shell.openPath(dir);
+    return !err;
+  });
+
   ipcMain.handle('papers:list', () => store.listPapers());
   ipcMain.handle('paper:get', (e, id) => {
     const p = store.getPaper(id);

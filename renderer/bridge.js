@@ -219,6 +219,9 @@ const webBridge = {
     });
   },
   async importPaths() { return { canceled: false, results: [{ error: '浏览器模式不支持路径导入' }] }; },
+  // 浏览器预览模式无本地 Agent API
+  async agentConnectionInfo() { return { baseUrl: null, port: null, token: null, extensionDir: null }; },
+  async openExtensionFolder() { return false; },
   async importFiles(files) {
     const results = [];
     for (const f of files) {

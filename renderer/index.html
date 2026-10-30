@@ -29,6 +29,7 @@
     <div class="top-actions">
       <button class="btn" id="btnBulkMode" data-i18n="☑️ 批量" data-i18n-title="批量选择并删除论文" title="批量选择并删除论文">☑️ 批量</button>
       <button class="btn" id="btnImport" data-i18n="📥 导入" data-i18n-title="导入论文：链接 / 拖拽文件 / 选择文件" title="导入论文：链接 / 拖拽文件 / 选择文件">📥 导入</button>
+      <button class="btn" id="btnExt" data-i18n="🧩 插件" data-i18n-title="浏览器插件：浏览 arXiv / PDF 页面时一键入库" title="浏览器插件：浏览 arXiv / PDF 页面时一键入库">🧩 插件</button>
       <button class="icon-btn wide" id="btnLang" data-i18n-title="切换中英文界面" title="切换中英文界面">🌐 EN</button>
       <button class="icon-btn wide" id="btnTheme" data-i18n-title="切换浅色 / 深色主题" title="切换浅色 / 深色主题">☀️</button>
     </div>
@@ -316,6 +317,36 @@
       <div class="modal-actions">
         <button class="btn" id="importCancel" data-i18n="取消">取消</button>
         <button class="btn btn-primary" id="importGo" data-i18n="开始导入">开始导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 浏览器插件连接信息对话框 -->
+  <div id="extModal" class="modal hidden">
+    <div class="modal-card">
+      <h3 data-i18n="🧩 浏览器插件（Chrome / Edge）">🧩 浏览器插件（Chrome / Edge）</h3>
+      <p class="modal-tip" data-i18n="在 arXiv 或论文 PDF 页面点击插件图标，即可把论文一键下载入库（类似 Zotero Connector）。首次使用请按下面步骤安装并填入连接信息。">在 arXiv 或论文 PDF 页面点击插件图标，即可把论文一键下载入库（类似 Zotero Connector）。首次使用请按下面步骤安装并填入连接信息。</p>
+      <div class="ext-conn">
+        <div class="ext-conn-row">
+          <span class="ext-conn-label" data-i18n="服务地址">服务地址</span>
+          <code id="extConnUrl">—</code>
+          <button class="btn small" id="extCopyUrl" data-i18n="复制">复制</button>
+        </div>
+        <div class="ext-conn-row">
+          <span class="ext-conn-label" data-i18n="访问令牌">访问令牌</span>
+          <code id="extConnToken">—</code>
+          <button class="btn small" id="extCopyToken" data-i18n="复制">复制</button>
+        </div>
+      </div>
+      <ol class="ext-steps">
+        <li data-i18n="点击下方按钮打开插件目录（extension 文件夹）">点击下方按钮打开插件目录（extension 文件夹）</li>
+        <li data-i18n="浏览器地址栏打开 chrome://extensions（Edge 为 edge://extensions），开启「开发人员模式」">浏览器地址栏打开 chrome://extensions（Edge 为 edge://extensions），开启「开发人员模式」</li>
+        <li data-i18n="点击「加载解压缩的扩展」，选择该 extension 文件夹">点击「加载解压缩的扩展」，选择该 extension 文件夹</li>
+        <li data-i18n="点击工具栏插件图标 → ⚙ 设置，粘贴上面的服务地址与访问令牌">点击工具栏插件图标 → ⚙ 设置，粘贴上面的服务地址与访问令牌</li>
+      </ol>
+      <div class="modal-actions">
+        <button class="btn" id="extOpenFolder" data-i18n="📂 打开插件目录">📂 打开插件目录</button>
+        <button class="btn btn-primary" id="extClose" data-i18n="关闭">关闭</button>
       </div>
     </div>
   </div>

@@ -151,6 +151,174 @@ export async function runSelftest(ctx) {
     const hlBoxes = document.querySelectorAll('.hl-box').length;
     check('高亮渲染到页面', hlBoxes >= 1, 'boxes=' + hlBoxes);
 
+    // ---------- 5.5 鼠标中心平滑缩放：页面、文字与高亮必须共享同一坐标系 ----------
+    await viewer.jumpToPage(1, 'auto');
+    await sleep(250);
+    const zoomPage = viewer.pages[0];
+    const zoomSpans = [...zoomPage.textLayerEl.querySelectorAll('span')];
+    const scrollRect = document.querySelector('#pdfScroll').getBoundingClientRect();
+    const zoomSpanIndex = zoomSpans.findIndex(s => {
+      const r = s.getBoundingClientRect();
+      return r.width > 30 && r.height > 5 && r.top >= scrollRect.top && r.bottom <= scrollRect.bottom;
+    });
+    const zoomSpan = zoomSpans[zoomSpanIndex];
+    check('缩放测试找到可见文字', !!zoomSpan, 'index=' + zoomSpanIndex);
+    if (zoomSpan) {
+      const textRect = zoomPage.textLayerEl.getBoundingClientRect();
+      const spanRect = zoomSpan.getBoundingClientRect();
+      const zoomAnn = {
+        id: 'a_test_zoom', type: 'highlight', page: 1,
+        quads: [{
+          x: (spanRect.left - textRect.left) / textRect.width,
+          y: (spanRect.top - textRect.top) / textRect.height,
+          w: spanRect.width / textRect.width,
+          h: spanRect.height / textRect.height,
+        }],
+        color: '#7ac7ff', text: 'zoom-alignment-test', createdAt: Date.now(),
+      };
+      viewer.annotations.push(zoomAnn);
+      viewer._renderAnnotationsFor(zoomPage);
+      const zoomBox = [...zoomPage.hlLayer.querySelectorAll('.hl-box')].find(b => b.title === zoomAnn.text);
+      const beforePageRect = zoomPage.wrap.getBoundingClientRect();
+      const beforeBoxRect = zoomBox.getBoundingClientRect();
+      const anchor = {
+        clientX: beforePageRect.left + beforePageRect.width * 0.55,
+        clientY: beforePageRect.top + Math.min(beforePageRect.height * 0.3, 180),
+      };
+      const anchorRatio = {
+        x: (anchor.clientX - beforePageRect.left) / beforePageRect.width,
+        y: (anchor.clientY - beforePageRect.top) / beforePageRect.height,
+      };
+      const zoomResult = viewer.zoom(1.2, anchor);
+      // 故意不等待重绘：交互帧必须立即缩放，不能在后台 PDF 重绘完成后才更新。
+      const immediatePageRect = zoomPage.wrap.getBoundingClientRect();
+      const immediateBoxRect = zoomBox.getBoundingClientRect();
+      const anchorErr = Math.hypot(
+        immediatePageRect.left + immediatePageRect.width * anchorRatio.x - anchor.clientX,
+        immediatePageRect.top + immediatePageRect.height * anchorRatio.y - anchor.clientY,
+      );
+      check('鼠标中心缩放即时生效且锚点不动',
+        immediatePageRect.width > beforePageRect.width * 1.1 && anchorErr < 1.5,
+        'width=' + beforePageRect.width.toFixed(1) + '→' + immediatePageRect.width.toFixed(1) + ', anchorErr=' + anchorErr.toFixed(2));
+      check('高亮随文字即时同步缩放',
+        immediateBoxRect.width > beforeBoxRect.width * 1.1,
+        'width=' + beforeBoxRect.width.toFixed(1) + '→' + immediateBoxRect.width.toFixed(1));
+      await zoomResult;
+      await sleep(900);
+      const settledSpan = zoomPage.textLayerEl.querySelectorAll('span')[zoomSpanIndex];
+      const settledBox = [...zoomPage.hlLayer.querySelectorAll('.hl-box')].find(b => b.title === zoomAnn.text);
+      const settledSpanRect = settledSpan.getBoundingClientRect();
+      const settledBoxRect = settledBox.getBoundingClientRect();
+      const alignErr = Math.max(
+        Math.abs(settledSpanRect.left - settledBoxRect.left),
+        Math.abs(settledSpanRect.top - settledBoxRect.top),
+        Math.abs(settledSpanRect.width - settledBoxRect.width),
+        Math.abs(settledSpanRect.height - settledBoxRect.height),
+      );
+      check('高清重绘后高亮仍与文字对齐', alignErr < 1.5, 'alignErr=' + alignErr.toFixed(2));
+      let continuousAnchorErr = 0;
+      for (let i = 0; i < 12; i++) {
+        const r0 = zoomPage.wrap.getBoundingClientRect();
+        const ratio = {
+          x: (anchor.clientX - r0.left) / r0.width,
+          y: (anchor.clientY - r0.top) / r0.height,
+        };
+        viewer.zoom(i % 2 === 0 ? 1.04 : 1 / 1.04, anchor);
+        const r1 = zoomPage.wrap.getBoundingClientRect();
+        continuousAnchorErr = Math.max(continuousAnchorErr, Math.hypot(
+          r1.left + r1.width * ratio.x - anchor.clientX,
+          r1.top + r1.height * ratio.y - anchor.clientY,
+        ));
+      }
+      check('连续放大缩小不累积鼠标锚点漂移', continuousAnchorErr < 1.5, 'maxErr=' + continuousAnchorErr.toFixed(2));
+      await sleep(900);
+      const continuousSpan = zoomPage.textLayerEl.querySelectorAll('span')[zoomSpanIndex].getBoundingClientRect();
+      const continuousBox = [...zoomPage.hlLayer.querySelectorAll('.hl-box')].find(b => b.title === zoomAnn.text).getBoundingClientRect();
+      const continuousAlignErr = Math.max(
+        Math.abs(continuousSpan.left - continuousBox.left),
+        Math.abs(continuousSpan.top - continuousBox.top),
+        Math.abs(continuousSpan.width - continuousBox.width),
+        Math.abs(continuousSpan.height - continuousBox.height),
+      );
+      check('连续缩放重绘后高亮位置保持稳定', continuousAlignErr < 1.5, 'alignErr=' + continuousAlignErr.toFixed(2));
+      viewer.annotations.splice(viewer.annotations.indexOf(zoomAnn), 1);
+      viewer._renderAnnotationsFor(zoomPage);
+      document.querySelector('#btnFitWidth').click();
+      await sleep(800);
+    }
+
+    // ---------- 5.6 双栏选区：同线不同栏分开，同栏碎片仍合并 ----------
+    const columnPage = viewer.pages[0];
+    const columnTextLayer = columnPage.textLayerEl;
+    const leftColumnSpan = document.createElement('span');
+    const rightColumnSpan = document.createElement('span');
+    leftColumnSpan.textContent = 'Left column selected text';
+    rightColumnSpan.textContent = 'Right column selected text';
+    leftColumnSpan.style.cssText = 'left:60px;top:500px;font:12px Arial;transform:none;';
+    rightColumnSpan.style.cssText = 'left:600px;top:500px;font:12px Arial;transform:none;';
+    columnTextLayer.append(leftColumnSpan, rightColumnSpan);
+    const columnSelection = window.getSelection();
+    let columnRawRects = [];
+    const selectColumnSpans = () => {
+      const range = document.createRange();
+      range.setStart(leftColumnSpan.firstChild, 0);
+      range.setEnd(rightColumnSpan.firstChild, rightColumnSpan.firstChild.length);
+      columnSelection.removeAllRanges();
+      columnSelection.addRange(range);
+      columnRawRects = [...range.getClientRects()].map(r => ({
+        left: +r.left.toFixed(1), right: +r.right.toFixed(1), top: +r.top.toFixed(1), height: +r.height.toFixed(1),
+      }));
+      viewer._onMouseUp();
+      return viewer._boundPopup ? viewer._boundPopup.quads : [];
+    };
+    const columnQuads = selectColumnSpans();
+    const columnLayerRect = columnTextLayer.getBoundingClientRect();
+    const columnPixels = columnQuads.map(q => ({
+      left: columnLayerRect.left + q.x * columnLayerRect.width,
+      right: columnLayerRect.left + (q.x + q.w) * columnLayerRect.width,
+    })).sort((a, b) => a.left - b.left);
+    const columnGap = columnPixels.length === 2 ? columnPixels[1].left - columnPixels[0].right : 0;
+    check('双栏同线选区保留栏间空白', columnPixels.length === 2 && columnGap > 100,
+      'quads=' + columnPixels.length + ', gap=' + columnGap.toFixed(1));
+
+    // 两个文本片段仍在同一栏、只有 4px 间隙时，应保持为一条连续高亮。
+    const leftSpanRect = leftColumnSpan.getBoundingClientRect();
+    const layoutScale = columnLayerRect.width / columnPage.viewport.width;
+    rightColumnSpan.style.left = ((leftSpanRect.right - columnLayerRect.left + 4) / layoutScale) + 'px';
+    const actualSmallGap = rightColumnSpan.getBoundingClientRect().left - leftColumnSpan.getBoundingClientRect().right;
+    const singleColumnQuads = selectColumnSpans();
+    check('同栏小间隙文本碎片连续合并', singleColumnQuads.length === 1,
+      'quads=' + singleColumnQuads.length + ', gap=' + actualSmallGap.toFixed(1) + ', raw=' + JSON.stringify(columnRawRects));
+    columnSelection.removeAllRanges();
+    viewer.opts.selPopup.classList.add('hidden');
+    viewer._boundPopup = null;
+    leftColumnSpan.remove();
+    rightColumnSpan.remove();
+
+    const columnOverlapAnn = {
+      id: 'a_test_column_overlap', type: 'highlight', page: 1,
+      quads: [
+        { x: 0.06, y: 0.20, w: 0.38, h: 0.03 },
+        { x: 0.56, y: 0.20, w: 0.38, h: 0.03 },
+        { x: 0.06, y: 0.225, w: 0.38, h: 0.03 },
+        { x: 0.56, y: 0.225, w: 0.38, h: 0.03 },
+      ],
+      color: '#ffe74a', text: 'column-overlap-test', createdAt: Date.now(),
+    };
+    viewer.annotations.push(columnOverlapAnn);
+    viewer._renderAnnotationsFor(columnPage);
+    const columnOverlapBoxes = [...columnPage.hlLayer.querySelectorAll('.hl-box')]
+      .filter(b => b.title === columnOverlapAnn.text).map(b => b.getBoundingClientRect());
+    let columnOverlapErr = 0;
+    for (let i = 0; i < columnOverlapBoxes.length; i++) for (let j = i + 1; j < columnOverlapBoxes.length; j++) {
+      const a = columnOverlapBoxes[i], b = columnOverlapBoxes[j];
+      if (Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5 &&
+          Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5) columnOverlapErr++;
+    }
+    check('双栏相邻行高亮无重叠', columnOverlapErr === 0, 'overlaps=' + columnOverlapErr);
+    viewer.annotations.splice(viewer.annotations.indexOf(columnOverlapAnn), 1);
+    viewer._renderAnnotationsFor(columnPage);
+
     // ---------- 6. 便利贴 ----------
     viewer.annotations.push({
       id: 'a_test_sticky', type: 'sticky', page: 2, x: 0.3, y: 0.4,

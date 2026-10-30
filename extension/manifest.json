@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "PaperWeave Connector",
+  "version": "1.1.0",
+  "description": "在 arXiv / 论文 PDF 页面一键把论文保存到 PaperWeave 论文库（需 PaperWeave 桌面端运行）。Save papers from arXiv / PDF pages into your PaperWeave library.",
+  "permissions": ["storage", "contextMenus", "tabs"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "*://arxiv.org/*",
+    "*://export.arxiv.org/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "保存到 PaperWeave",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

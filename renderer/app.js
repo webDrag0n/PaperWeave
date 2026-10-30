@@ -699,6 +699,19 @@ function openImportModal() {
   setTimeout(() => $('#importDrop').focus(), 50);
 }
 
+/* ---------------- 浏览器插件连接信息 ---------------- */
+async function openExtModal() {
+  $('#extModal').classList.remove('hidden');
+  try {
+    const info = await bridge.agentConnectionInfo();
+    $('#extConnUrl').textContent = (info && info.baseUrl) || t('（Agent API 未启动）');
+    $('#extConnToken').textContent = (info && info.token) || '—';
+  } catch (_) {
+    $('#extConnUrl').textContent = '—';
+    $('#extConnToken').textContent = '—';
+  }
+}
+
 /* ---- 库外发现：经典先驱（共同被引的参考文献）/ 衍生新作（同时引用库内多篇） ---- */
 function openDiscoverModal() {
   $('#discoverModal').classList.remove('hidden');
@@ -1695,6 +1708,21 @@ function bindEvents() {
   });
   $('#btnImport').addEventListener('click', openImportModal);
   $('#btnImportEmpty').addEventListener('click', openImportModal);
+  // 浏览器插件：连接信息弹窗
+  $('#btnExt').addEventListener('click', openExtModal);
+  $('#extClose').addEventListener('click', () => $('#extModal').classList.add('hidden'));
+  $('#extCopyUrl').addEventListener('click', () => {
+    const v = $('#extConnUrl').textContent;
+    if (v && v !== '—') copyText(v, t('已复制到剪贴板'));
+  });
+  $('#extCopyToken').addEventListener('click', () => {
+    const v = $('#extConnToken').textContent;
+    if (v && v !== '—') copyText(v, t('已复制到剪贴板'));
+  });
+  $('#extOpenFolder').addEventListener('click', async () => {
+    const okOpen = await bridge.openExtensionFolder();
+    if (!okOpen) toast(t('未找到插件目录，请从项目仓库获取 extension 文件夹'), true, 4000);
+  });
   // 库外发现：经典先驱 / 衍生新作
   $('#btnDiscover').addEventListener('click', openDiscoverModal);
   $('#discoverClose').addEventListener('click', () => $('#discoverModal').classList.add('hidden'));
@@ -1841,11 +1869,14 @@ function bindEvents() {
     });
   });
 
-  // 阅读器：Ctrl + 滚轮缩放
+  // 阅读器：Ctrl + 滚轮 / 触控板捏合缩放；按滚动幅度连续变化，并锁定鼠标下的内容。
   $('#pdfScroll').addEventListener('wheel', (e) => {
     if (!e.ctrlKey || !viewer || state.view !== 'reader') return;
     e.preventDefault();
-    viewer.zoom(e.deltaY < 0 ? 1.1 : 1 / 1.1).then(updateZoomLabel);
+    const unit = e.deltaMode === 1 ? 16 : (e.deltaMode === 2 ? $('#pdfScroll').clientHeight : 1);
+    const factor = Math.max(0.8, Math.min(1.25, Math.exp(-e.deltaY * unit * 0.001)));
+    viewer.zoom(factor, { clientX: e.clientX, clientY: e.clientY });
+    updateZoomLabel();
   }, { passive: false });
 
   // 选中弹条
@@ -1956,8 +1987,8 @@ function bindEvents() {
       if (state.view === 'graph') { closeGraph(); return; }
       if (viewer && viewer.stickyMode) { viewer.setStickyMode(false); $('#btnStickyMode').classList.remove('on'); }
     }
-    if (e.key === '+' && e.ctrlKey && state.view === 'reader') { e.preventDefault(); viewer.zoom(1.2).then(updateZoomLabel); }
-    if (e.key === '-' && e.ctrlKey && state.view === 'reader') { e.preventDefault(); viewer.zoom(1 / 1.2).then(updateZoomLabel); }
+    if (e.key === '+' && e.ctrlKey && state.view === 'reader') { e.preventDefault(); viewer.zoom(1.2); updateZoomLabel(); }
+    if (e.key === '-' && e.ctrlKey && state.view === 'reader') { e.preventDefault(); viewer.zoom(1 / 1.2); updateZoomLabel(); }
     // Ctrl+F：打开阅读器内全文搜索
     if (e.key === 'f' && e.ctrlKey && state.view === 'reader') {
       e.preventDefault();
