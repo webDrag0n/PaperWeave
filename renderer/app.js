@@ -1,6 +1,7 @@
 // PaperWeave 渲染进程主逻辑
 import { bridge, isWeb } from './bridge.js';
 import { PdfViewer } from './pdfviewer.js';
+import { CitationPopup } from './citation-popup.js';
 import { GraphView, graphThemePalette } from './graph.js';
 import { computeSimEdges, topSimilar, aggregateExternal } from './similarity.js';
 import { renderMarkdown, inlineMd } from './markdown.js';
@@ -28,6 +29,7 @@ const state = {
 
 let viewer = null;
 let graph = null;
+let citationPopup = null;
 
 /* ---------------- 工具 ---------------- */
 function toast(msg, isErr = false, ms = 2600) {
@@ -818,6 +820,7 @@ async function runImport() {
 async function openReader(paperId) {
   const paper = await bridge.getPaper(paperId);
   if (!paper) { toast(t('论文不存在'), true); return; }
+  if (citationPopup) citationPopup.hide();
   state.readerPaperId = paperId;
   showView('reader');
   $('#readerTitle').innerHTML = inlineMd(paper.title);
@@ -828,6 +831,16 @@ async function openReader(paperId) {
 
   state.annots = await bridge.listAnnotations(paperId);
 
+  if (!citationPopup) {
+    citationPopup = new CitationPopup({
+      root: $('#citationPopup'),
+      onOpenPaper: (id) => openReader(id),
+      onDownload: async (ext, btn) => {
+        const result = await downloadOneRef(ext, btn);
+        return result ? result.paper : null;
+      },
+    });
+  }
   if (!viewer) {
     viewer = new PdfViewer({
       pagesEl: $('#pdfPages'),
@@ -845,6 +858,8 @@ async function openReader(paperId) {
       },
       onAnnotClick: (a, ev) => viewer.openNotePopup(a, ev.clientX, ev.clientY),
       onStickyPlaced: () => $('#btnStickyMode').classList.remove('on'),
+      onCitationHover: (entries, point) => citationPopup.scheduleShow(entries, point),
+      onCitationLeave: () => citationPopup.scheduleHide(),
     });
   }
   $('#pdfScroll').scrollTop = 0;
@@ -861,6 +876,7 @@ async function openReader(paperId) {
     showView('library');
     return;
   }
+  await refreshCitationIndex();
   updateZoomLabel();
   fillMetaForm(paper);
   renderAnnotList();
@@ -1342,9 +1358,20 @@ async function fetchCitationsFor(paperId) {
   toast(tf('被引新增 {n} 条关联', { n: r.added }));
 }
 
+async function refreshCitationIndex() {
+  if (!viewer || !state.readerPaperId) return [];
+  const paperId = state.readerPaperId;
+  const entries = await bridge.citationIndex(paperId);
+  if (state.readerPaperId === paperId) viewer.setCitationIndex(entries);
+  return entries;
+}
+
 async function afterRefsChanged(paperId) {
   await refreshData();
-  if (state.view === 'reader' && state.readerPaperId === paperId) renderRefLists();
+  if (state.view === 'reader' && state.readerPaperId === paperId) {
+    renderRefLists();
+    await refreshCitationIndex();
+  }
   if (state.view === 'graph' && graph) applyGraphFilter();
   if (state.view === 'library') renderLibrary();
 }
@@ -2082,4 +2109,4 @@ async function init() {
 window.addEventListener('DOMContentLoaded', init);
 
 // 暴露给自测
-window.__pg = { state, get viewer() { return viewer; }, get graph() { return graph; }, refsProgressUI, resolveConflicts, bibtexOf, sim: { computeSimEdges, topSimilar, aggregateExternal } };
+window.__pg = { state, get viewer() { return viewer; }, get graph() { return graph; }, get citationPopup() { return citationPopup; }, refsProgressUI, resolveConflicts, bibtexOf, sim: { computeSimEdges, topSimilar, aggregateExternal } };

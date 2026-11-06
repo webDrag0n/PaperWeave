@@ -356,6 +356,36 @@ export async function runSelftest(ctx) {
       viewer.setCitationIndex([]);
     }
 
+    // ---------- 5.8 引用浮窗：三类卡片、摘要展开、移入保持与 Esc ----------
+    let CitationPopupClass = null;
+    try { ({ CitationPopup: CitationPopupClass } = await import('./citation-popup.js')); } catch (_) {}
+    check('引用浮窗组件可加载', !!CitationPopupClass);
+    if (CitationPopupClass) {
+      const popupRoot = document.createElement('div');
+      document.body.appendChild(popupRoot);
+      const popup = new CitationPopupClass({
+        root: popupRoot,
+        onOpenPaper: () => {},
+        onDownload: async () => null,
+      });
+      popup.show(hoverFixtures, { clientX: 500, clientY: 300 });
+      check('浮窗显示库内未入库和原始条目卡片',
+        popupRoot.querySelectorAll('.citation-card.library').length === 1 &&
+        popupRoot.querySelectorAll('.citation-card.external').length === 1 &&
+        popupRoot.querySelectorAll('.citation-card.raw').length === 1);
+      const abstractDetails = popupRoot.querySelector('details.citation-abstract');
+      abstractDetails.querySelector('summary').click();
+      check('库内论文摘要可展开', abstractDetails.open === true);
+      popupRoot.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false }));
+      popup.scheduleHide();
+      await sleep(220);
+      check('鼠标移入浮窗后保持显示', !popupRoot.classList.contains('hidden'));
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      check('Esc 关闭引用浮窗', popupRoot.classList.contains('hidden'));
+      popup.destroy();
+      popupRoot.remove();
+    }
+
     // ---------- 6. 便利贴 ----------
     viewer.annotations.push({
       id: 'a_test_sticky', type: 'sticky', page: 2, x: 0.3, y: 0.4,
