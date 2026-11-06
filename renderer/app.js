@@ -2086,6 +2086,7 @@ async function init() {
           if (p) { fillMetaForm(p); renderRefLists(); }
           state.annots = await bridge.listAnnotations(state.readerPaperId);
           if (viewer) { viewer.annotations = state.annots; viewer._renderAnnotations(); }
+          await refreshCitationIndex();
           renderAnnotList();
         }
       }, 250);

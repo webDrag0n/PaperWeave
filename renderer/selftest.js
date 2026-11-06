@@ -61,6 +61,7 @@ export async function runSelftest(ctx) {
     await sleep(600);
     const viewer = window.__pg.viewer;
     check('PDF 阅读器打开', viewer && viewer.pages.length === 3);
+    check('打开论文时加载正文引用索引', viewer && viewer.citationEntries.length > 0, 'entries=' + (viewer ? viewer.citationEntries.length : 0));
     await sleep(1200);
     check('首屏页面即时渲染', viewer && viewer.pages[0].rendered && viewer.pages[0].viewport);
     // 滚动到底部触发懒渲染
@@ -380,6 +381,7 @@ export async function runSelftest(ctx) {
       popup.scheduleHide();
       await sleep(220);
       check('鼠标移入浮窗后保持显示', !popupRoot.classList.contains('hidden'));
+      await bridge.selftestShot('03-citation-popup');
       document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       check('Esc 关闭引用浮窗', popupRoot.classList.contains('hidden'));
       popup.destroy();
