@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('paperweave', {
   fetchReferences: (paperId) => ipcRenderer.invoke('refs:fetchReferences', paperId),
   fetchCitations: (paperId) => ipcRenderer.invoke('refs:fetchCitations', paperId),
   autoMatchRefs: (paperId) => ipcRenderer.invoke('refs:autoMatch', paperId),
+  citationIndex: (paperId) => ipcRenderer.invoke('refs:citationIndex', paperId),
   downloadRef: (paperId, key) => ipcRenderer.invoke('refs:downloadRef', paperId, key),
   downloadAllRefs: (paperId, dir) => ipcRenderer.invoke('refs:downloadAllRefs', paperId, dir),
 

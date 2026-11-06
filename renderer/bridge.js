@@ -334,6 +334,13 @@ const webBridge = {
     saveData(d);
     return true;
   },
+  async citationIndex(paperId) {
+    const d = loadData();
+    const paper = d.papers.find(p => p.id === paperId);
+    if (!paper) return [];
+    const { buildCitationIndexWeb } = await import('./citation-index.js');
+    return buildCitationIndexWeb(paper, libPapers(d));
+  },
   async fetchRefs(paperId) {
     const references = await this.fetchReferences(paperId);
     const citations = await this.fetchCitations(paperId);
