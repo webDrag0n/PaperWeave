@@ -384,6 +384,51 @@ export async function runSelftest(ctx) {
       check('Esc 关闭引用浮窗', popupRoot.classList.contains('hidden'));
       popup.destroy();
       popupRoot.remove();
+
+      // 下载失败允许重试，第二次成功后同一卡片升级为库内状态。
+      const statefulRoot = document.createElement('div');
+      document.body.appendChild(statefulRoot);
+      let attempts = 0;
+      const statefulPopup = new CitationPopupClass({
+        root: statefulRoot,
+        onOpenPaper: () => {},
+        onDownload: async () => (++attempts === 1 ? null : attention),
+      });
+      statefulPopup.show([hoverFixtures[1]], { clientX: 500, clientY: 300 });
+      statefulRoot.querySelector('.citation-download').click();
+      await sleep(20);
+      check('浮窗下载失败显示错误并允许重试',
+        !!statefulRoot.querySelector('.citation-error') && !statefulRoot.querySelector('.citation-download').disabled);
+      statefulRoot.querySelector('.citation-download').click();
+      await sleep(20);
+      check('浮窗下载成功原地升级为库内卡片', !!statefulRoot.querySelector('.citation-card.library'));
+      statefulPopup.destroy();
+      statefulRoot.remove();
+    }
+
+    // 真实 app 下载链路使用 mock 网络结果，验证 downloadOneRef 返回值与索引刷新。
+    const appPopup = window.__pg.citationPopup;
+    if (appPopup) {
+      const originalDownload = bridge.downloadRef;
+      const originalSetIndex = viewer.setCitationIndex.bind(viewer);
+      const originalExternals = (await bridge.getPaper(attention.id)).externalRefs;
+      let indexRefreshes = 0;
+      viewer.setCitationIndex = (entries) => { indexRefreshes++; return originalSetIndex(entries); };
+      bridge.downloadRef = async (paperId, key) => {
+        const current = await bridge.getPaper(paperId);
+        await bridge.updatePaper(paperId, { externalRefs: current.externalRefs.filter(e => e.key !== key) });
+        return { ok: true, paper: attention, duplicate: true };
+      };
+      appPopup.show([hoverFixtures[1]], { clientX: 500, clientY: 300 });
+      appPopup.root.querySelector('.citation-download').click();
+      await sleep(700);
+      check('真实下载链路返回论文并更新浮窗', !!appPopup.root.querySelector('.citation-card.library'));
+      check('下载完成后正文引用索引已刷新', indexRefreshes >= 1, 'refreshes=' + indexRefreshes);
+      bridge.downloadRef = originalDownload;
+      viewer.setCitationIndex = originalSetIndex;
+      await bridge.updatePaper(attention.id, { externalRefs: originalExternals });
+      await refreshData();
+      appPopup.hide();
     }
 
     // ---------- 6. 便利贴 ----------

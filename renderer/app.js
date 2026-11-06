@@ -1277,11 +1277,12 @@ async function downloadOneRef(ext, btn) {
     btn.textContent = orig;
     refsMsg(r.error, true);
     toast(r.error, true, 4500);
-    return;
+    return null;
   }
   await afterRefsChanged(state.readerPaperId);
   refsMsg(`《${(r.paper.title || '').slice(0, 40)}》${t(r.duplicate ? '库中已存在，已关联' : '已下载入库（默认未评分）并建立关联')}`);
   toast(t(r.duplicate ? '已关联库内已有论文' : '下载入库成功'));
+  return r;
 }
 
 async function downloadAllRefs(dir) {
