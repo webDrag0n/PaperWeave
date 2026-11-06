@@ -319,6 +319,43 @@ export async function runSelftest(ctx) {
     viewer.annotations.splice(viewer.annotations.indexOf(columnOverlapAnn), 1);
     viewer._renderAnnotationsFor(columnPage);
 
+    // ---------- 5.7 正文引用标记：跨文本片段、范围展开、作者年份与无效编号 ----------
+    const hoverFixtures = [
+      { id: 'ref_1', order: 1, number: 1, surname: 'vaswani', year: '2017', title: attention.title, kind: 'library', paper: attention, external: null, raw: 'Attention reference' },
+      { id: 'ref_2', order: 2, number: 2, surname: 'kingma', year: '2015', title: 'Adam: A Method for Stochastic Optimization', kind: 'external', paper: null, external: (await bridge.getPaper(attention.id)).externalRefs[0], raw: 'Adam reference' },
+      { id: 'ref_3', order: 3, number: 3, surname: 'unknown', year: '2020', title: 'Unresolved reference', kind: 'raw', paper: null, external: null, raw: 'Unresolved reference raw text' },
+    ];
+    check('引用标记定位接口已注册', typeof viewer.setCitationIndex === 'function');
+    if (typeof viewer.setCitationIndex === 'function') {
+      const markerSpans = [];
+      const makeMarkerSpan = (text, left, top) => {
+        const s = document.createElement('span');
+        s.textContent = text;
+        s.style.cssText = `left:${left}px;top:${top}px;font:12px Arial;transform:none;`;
+        columnTextLayer.appendChild(s);
+        markerSpans.push(s);
+        return s;
+      };
+      makeMarkerSpan('See [', 60, 550);
+      const numericSpan = makeMarkerSpan('1–2]', 92, 550);
+      const authorSpan = makeMarkerSpan('Vaswani et al. (2017)', 60, 575);
+      const invalidSpan = makeMarkerSpan('[99]', 60, 600);
+      viewer.setCitationIndex(hoverFixtures);
+      viewer._buildCitationMarkers(columnPage);
+      const numericMarker = columnPage.citationMarkers.find(m => m.entryIds.includes('ref_1') && m.entryIds.includes('ref_2'));
+      check('跨片段数字范围引用展开', !!numericMarker, columnPage.citationMarkers.map(m => m.entryIds.join(',')).join('|'));
+      check('作者年份引用匹配', columnPage.citationMarkers.some(m => m.entryIds.includes('ref_1') && m !== numericMarker));
+      check('无效编号不生成引用标记', !columnPage.citationMarkers.some(m => m.entryIds.includes('ref_99')));
+      const nr = numericSpan.getBoundingClientRect();
+      const hit = viewer._citationAtPoint(nr.left + 2, nr.top + nr.height / 2);
+      check('鼠标位置返回对应引用条目', hit && hit.entries.length === 2, hit ? hit.entries.map(e => e.id).join(',') : 'null');
+      const ar = authorSpan.getBoundingClientRect();
+      const authorHit = viewer._citationAtPoint(ar.left + ar.width / 2, ar.top + ar.height / 2);
+      check('作者年份悬浮精确返回库内论文', authorHit && authorHit.entries.length === 1 && authorHit.entries[0].id === 'ref_1', authorHit ? authorHit.entries.map(e => e.id).join(',') : 'null');
+      markerSpans.forEach(s => s.remove());
+      viewer.setCitationIndex([]);
+    }
+
     // ---------- 6. 便利贴 ----------
     viewer.annotations.push({
       id: 'a_test_sticky', type: 'sticky', page: 2, x: 0.3, y: 0.4,

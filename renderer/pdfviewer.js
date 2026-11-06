@@ -24,6 +24,16 @@ export class PdfViewer {
     this._renderToken = 0;
     this._zoomCommitTimer = null;
     this._boundPopup = null;
+    this.citationEntries = [];
+    this._citationById = new Map();
+    this._citationPoint = null;
+    this._citationRaf = 0;
+    this._lastCitationKey = '';
+    this._citationMoveHandler = (ev) => this._queueCitationHit(ev);
+    this._citationLeaveHandler = () => this._clearCitationHover();
+    this.opts.pagesEl.addEventListener('pointermove', this._citationMoveHandler);
+    this.opts.pagesEl.addEventListener('pointerleave', this._citationLeaveHandler);
+    this.opts.scrollEl.addEventListener('scroll', this._citationLeaveHandler);
   }
 
   async open(paperId, bytes, annotations) {
@@ -77,6 +87,7 @@ export class PdfViewer {
 
   async renderAll() {
     const token = ++this._renderToken;
+    this._clearCitationHover();
     clearTimeout(this._zoomCommitTimer);
     this._zoomCommitTimer = null;
     // 只更新布局占位；旧 stage 保持到对应页的新画布和文本层都准备好，避免重绘白闪。
@@ -142,6 +153,124 @@ export class PdfViewer {
     p.stage.style.width = (p.viewport1.width * renderScale) + 'px';
     p.stage.style.height = (p.viewport1.height * renderScale) + 'px';
     p.stage.style.transform = 'scale(' + (this.scale / renderScale) + ')';
+  }
+
+  /* ---------------- 正文引用：逻辑文本标记与悬浮命中 ---------------- */
+  setCitationIndex(entries) {
+    this.citationEntries = Array.isArray(entries) ? entries : [];
+    this._citationById = new Map(this.citationEntries.map(e => [e.id, e]));
+    for (const p of this.pages) if (p.rendered) this._buildCitationMarkers(p);
+    this._clearCitationHover();
+  }
+
+  _buildCitationMarkers(p) {
+    p.citationMarkers = [];
+    p.citationSegments = [];
+    if (!p.textLayerEl || !this.citationEntries.length) return;
+    const walker = document.createTreeWalker(p.textLayerEl, NodeFilter.SHOW_TEXT);
+    let offset = 0, text = '', node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue || !node.parentElement || !node.parentElement.closest('span')) continue;
+      const start = offset;
+      text += node.nodeValue;
+      offset += node.nodeValue.length;
+      p.citationSegments.push({ node, start, end: offset });
+    }
+    const byNumber = new Map(this.citationEntries.filter(e => typeof e.number === 'number').map(e => [e.number, e]));
+    const addMarker = (start, end, entryIds) => {
+      const ids = [...new Set(entryIds)].filter(id => this._citationById.has(id));
+      if (!ids.length || p.citationMarkers.some(m => m.start === start && m.end === end)) return;
+      p.citationMarkers.push({ start, end, entryIds: ids });
+    };
+    const numericIds = (content) => {
+      const ids = [];
+      for (const part of content.split(/[,;，、]/)) {
+        const range = part.match(/(\d{1,3})\s*[-–—]\s*(\d{1,3})/);
+        if (range) {
+          const from = parseInt(range[1], 10), to = parseInt(range[2], 10);
+          if (to >= from && to - from <= 100) {
+            for (let n = from; n <= to; n++) if (byNumber.has(n)) ids.push(byNumber.get(n).id);
+          }
+          continue;
+        }
+        const single = part.match(/\d{1,3}/);
+        if (single) {
+          const entry = byNumber.get(parseInt(single[0], 10));
+          if (entry) ids.push(entry.id);
+        }
+      }
+      return ids;
+    };
+    const numericRe = /\[\s*\d{1,3}(?:(?:\s*[,;，、]\s*|\s*[-–—]\s*)\d{1,3})*\s*\]/g;
+    for (const match of text.matchAll(numericRe)) {
+      addMarker(match.index, match.index + match[0].length, numericIds(match[0].slice(1, -1)));
+    }
+    const addAuthorMarker = (match) => {
+      const surnameMatch = match[0].match(/[A-Z][A-Za-zÀ-ÿ'\-]+/);
+      const yearMatch = match[0].match(/(?:19|20)\d{2}/);
+      if (!surnameMatch || !yearMatch) return;
+      const surname = surnameMatch[0].toLowerCase(), year = yearMatch[0];
+      const ids = this.citationEntries
+        .filter(e => e.surname === surname && String(e.year || '').slice(0, 4) === year)
+        .map(e => e.id);
+      addMarker(match.index, match.index + match[0].length, ids);
+    };
+    const narrativeRe = /[A-Z][A-Za-zÀ-ÿ'\-]+(?:\s+et al\.?)?\s*,?\s*\(\s*(?:19|20)\d{2}[a-z]?\s*\)/g;
+    const parentheticalRe = /\(\s*[A-Z][A-Za-zÀ-ÿ'\-]+(?:\s+et al\.?)?\s*,\s*(?:19|20)\d{2}[a-z]?\s*\)/g;
+    for (const match of text.matchAll(narrativeRe)) addAuthorMarker(match);
+    for (const match of text.matchAll(parentheticalRe)) addAuthorMarker(match);
+    p.citationMarkers.sort((a, b) => a.start - b.start);
+  }
+
+  _citationAtPoint(clientX, clientY) {
+    if (!this.citationEntries.length) return null;
+    let node = null, nodeOffset = 0;
+    if (document.caretRangeFromPoint) {
+      const range = document.caretRangeFromPoint(clientX, clientY);
+      if (range) { node = range.startContainer; nodeOffset = range.startOffset; }
+    } else if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(clientX, clientY);
+      if (pos) { node = pos.offsetNode; nodeOffset = pos.offset; }
+    }
+    if (!node) return null;
+    for (const p of this.pages) {
+      if (!p.textLayerEl || !p.textLayerEl.contains(node) || !p.citationSegments) continue;
+      const segment = p.citationSegments.find(s => s.node === node && nodeOffset >= 0 && nodeOffset <= s.node.nodeValue.length);
+      if (!segment) return null;
+      const offset = segment.start + nodeOffset;
+      const marker = (p.citationMarkers || []).find(m => offset >= m.start && offset <= m.end);
+      if (!marker) return null;
+      const entries = marker.entryIds.map(id => this._citationById.get(id)).filter(Boolean);
+      return entries.length ? { page: p, marker, entries } : null;
+    }
+    return null;
+  }
+
+  _queueCitationHit(ev) {
+    this._citationPoint = { clientX: ev.clientX, clientY: ev.clientY };
+    if (this._citationRaf) return;
+    this._citationRaf = requestAnimationFrame(() => {
+      this._citationRaf = 0;
+      const point = this._citationPoint;
+      const hit = point && this._citationAtPoint(point.clientX, point.clientY);
+      if (!hit) {
+        if (this._lastCitationKey) this._clearCitationHover();
+        return;
+      }
+      const key = pKey(hit.page) + ':' + hit.marker.entryIds.join(',');
+      if (key === this._lastCitationKey) return;
+      this._lastCitationKey = key;
+      this.opts.onCitationHover && this.opts.onCitationHover(hit.entries, point);
+    });
+    function pKey(p) { return String(p.num); }
+  }
+
+  _clearCitationHover() {
+    if (this._citationRaf) cancelAnimationFrame(this._citationRaf);
+    this._citationRaf = 0;
+    this._citationPoint = null;
+    this._lastCitationKey = '';
+    this.opts.onCitationLeave && this.opts.onCitationLeave();
   }
 
   _renderAnnotationsFor(p) {
@@ -235,6 +364,7 @@ export class PdfViewer {
       p.renderScale = scale;
       p.rendered = true;
       this._updatePageTransform(p);
+      this._buildCitationMarkers(p);
       return true;
     } catch (err) {
       if (!err || err.name !== 'RenderingCancelledException') {
@@ -738,6 +868,9 @@ export class PdfViewer {
 
   destroy() {
     ++this._renderToken;
+    this._clearCitationHover();
+    this.citationEntries = [];
+    this._citationById = new Map();
     clearTimeout(this._zoomCommitTimer);
     this._zoomCommitTimer = null;
     document.removeEventListener('mouseup', this._selHandler);
