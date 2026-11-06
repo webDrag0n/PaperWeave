@@ -10,6 +10,7 @@
     "start": "electron .",
     "dev": "node tools/dev-server.js",
     "selftest": "node tools/selftest.js",
+    "citationtest": "node tools/citation-index-test.js",
     "pack": "node tools/build.js --dir",
     "dist": "node tools/build.js",
     "dist:win": "node tools/build.js --win",
