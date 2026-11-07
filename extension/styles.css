@@ -73,6 +73,7 @@ button { font-family: inherit; }
 .empty-text { text-align: center; font-size: 13px; margin-bottom: 6px; }
 .empty-sub { text-align: center; font-size: 11px; color: var(--text-dim); line-height: 1.6; }
 #setupView .btn { display: block; margin: 12px auto 4px; }
+#setupView .link-btn { display: block; margin: 10px auto 0; }
 
 .pw-footer {
   display: flex; align-items: center; justify-content: space-between;

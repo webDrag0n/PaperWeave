@@ -70,6 +70,26 @@ function placeAgentsDoc() {
   }
 }
 
+async function confirmConnectorPair({ client }) {
+  if (SELFTEST) return true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: '允许浏览器插件连接？',
+    message: `${client || 'PaperWeave Connector'} 请求连接 PaperWeave`,
+    detail: '允许后，插件可以将浏览器中的论文保存到当前论文库。仅在你主动安装并信任该插件时允许。此次授权会保存在插件本地，之后无需再次配置 API Key。',
+    buttons: ['允许连接', '拒绝'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  return result.response === 0;
+}
+
 async function startAgentInterface() {
   if (process.env.PAPERWEAVE_AGENT_API === '0') return;
   // 令牌持久化在应用级元数据中，同一安装保持稳定
@@ -86,6 +106,7 @@ async function startAgentInterface() {
     onChanged: notifyChanged,
     refsProgress,
     onProgress: progressEmitter,
+    onConnectorPair: confirmConnectorPair,
   });
   if (!started) return;
   agentServer = started.server;

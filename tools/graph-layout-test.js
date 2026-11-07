@@ -6,7 +6,7 @@ const path = require('node:path');
 (async () => {
   const file = path.join(__dirname, '..', 'renderer', 'graph-layout.js');
   const source = fs.readFileSync(file, 'utf8');
-  const { computeTimelineLayout } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+  const { computeTimelineLayout, collectLineageIds } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
   const papers = [
     { id: 'new', year: 2020 },
     { id: 'old-a', year: '2017' },
@@ -26,5 +26,21 @@ const path = require('node:path');
   assert.equal(computeTimelineLayout([{ id: 'one', year: '2024' }]).positions.get('one').y, 0);
   assert.equal(computeTimelineLayout([{ id: 'u', year: null }], { unknownLabel: 'Unknown' }).columns[0].label, 'Unknown');
   assert.deepEqual(computeTimelineLayout([]), { positions: new Map(), columns: [], yearLabelY: 14, minY: 0, maxY: 0 });
-  console.log('PASS 时间线年份分组、排序、未知年份、坐标间距与空输入');
+
+  const links = [
+    { from: 'a', to: 'b' },
+    { from: 'b', to: 'c' },
+    { from: 'c', to: 'd' },
+    { from: 'e', to: 'c' },
+    { from: 'x', to: 'y' },
+  ];
+  const lineage = collectLineageIds(links, 'c');
+  assert.deepEqual([...lineage.upstream].sort(), ['d']);
+  assert.deepEqual([...lineage.downstream].sort(), ['a', 'b', 'e']);
+  assert.deepEqual([...lineage.ids].sort(), ['a', 'b', 'c', 'd', 'e']);
+  const cyclic = collectLineageIds([...links, { from: 'd', to: 'b' }], 'c');
+  assert.equal(cyclic.ids.size, 5);
+  assert.ok(!cyclic.ids.has('x') && !cyclic.ids.has('y'));
+  assert.deepEqual([...collectLineageIds([], 'missing').ids], ['missing']);
+  console.log('PASS 时间线布局与递归上下游谱系计算');
 })().catch(err => { console.error(err); process.exit(1); });

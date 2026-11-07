@@ -154,6 +154,8 @@ const DICT = {
   '下载失败': 'Download failed',
   '关闭': 'Close',
   '拖动旋转 · 滚轮缩放 · 单击选中 · Shift+点击多选 · 双击打开 · Esc 返回': 'Drag to rotate · Scroll to zoom · Click to select · Shift+click to multi-select · Double-click to open · Esc to go back',
+  '拖动平移 · 滚轮缩放 · 单击选中 · Shift+点击多选 · 双击打开 · Esc 返回': 'Drag to pan · Scroll to zoom · Click to select · Shift+click to multi-select · Double-click to open · Esc to go back',
+  '拖动平移 · 滚轮缩放 · Shift 横向 · Ctrl 纵向 · 单击选中 · Shift+点击多选 · 双击打开 · Esc 返回': 'Drag to pan · Scroll to zoom · Shift for horizontal · Ctrl for vertical · Click to select · Shift+click to multi-select · Double-click to open · Esc to go back',
   '节点筛选': 'Filter nodes',
   '全部（含未评分）': 'All (incl. unrated)',
   '≥ 1 星': '≥ 1 star',

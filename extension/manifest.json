@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PaperWeave Connector",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "在 arXiv / 论文 PDF 页面一键把论文保存到 PaperWeave 论文库（需 PaperWeave 桌面端运行）。Save papers from arXiv / PDF pages into your PaperWeave library.",
   "permissions": ["storage", "contextMenus", "tabs"],
   "host_permissions": [

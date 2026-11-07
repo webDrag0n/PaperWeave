@@ -6,7 +6,7 @@
 
 - 应用：PaperWeave（跨平台论文阅读器，Windows / macOS / Linux）
 - 接口形式：本地 HTTP JSON API（`127.0.0.1`，仅本机回环）+ MCP stdio Server（`paperweave-mcp.js`）
-- API 版本：`6`（自 PaperWeave 1.2.0 起；鉴权头 `X-PaperWeave-Token`）
+- API 版本：`7`（自 PaperWeave 1.2.0 起；鉴权头 `X-PaperWeave-Token`，浏览器插件支持一次性配对授权）
 
 > **0.8.0 多论文库架构**：论文本体全局统一存储（每篇论文唯一 id，PDF 内容哈希命名共享一份文件），
 > 论文库（library）只记录「包含哪些论文 id + 库内引用关联」。批注 / 笔记 / 评星随论文全局保存。
@@ -111,13 +111,15 @@ Linux：`~/.config/paperweave/paperweave-data/agent-api.json`
 
 ### 1.2 鉴权
 
-除 `GET /api/ping` 外，所有请求必须携带请求头：
+除 `GET /api/ping` 与浏览器插件配对 `POST /api/connector/pair` 外，所有请求必须携带请求头：
 
 ```
 X-PaperWeave-Token: <agent-api.json 中的 token>
 ```
 
 令牌在同一论文库生命周期内保持稳定；删除数据目录会重新生成。
+
+PaperWeave Connector 无需用户手动复制令牌：插件自动扫描 `127.0.0.1:24680–24700`，通过 `/api/ping` 发现桌面端，再发起配对。配对仅接受 `chrome-extension://` / `moz-extension://` 来源，桌面端弹窗明确批准后才返回令牌；普通网页来源会被拒绝，令牌由插件保存在本地。
 
 ### 1.3 约定
 
@@ -309,6 +311,13 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/graph
 返回 `{ nodes: [...论文...], edges: [{ id, from, to, source }] }`。
 渲染约定（与 GUI 一致）：选中某节点后——它引用的节点为蓝色、引用它的节点为橙色、互引为紫色、自身为黄色、其余为灰色。
 
+### 3.8 浏览器插件
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/connector/pair` | 扩展来源配对请求；Body 可含 `client` / `extensionId`。桌面端批准后返回 `{ ok:true, data:{ token } }`，拒绝返回 403，同时已有请求等待确认时返回 409 |
+| POST | `/api/papers/import-web` | 需令牌；接收 `url` / `pdfUrl` 及 `title` / `authors` / `year` / `doi` / `abstract` / `venue` 元数据提示，下载 PDF 入库并自动建立引用 |
+
 ---
 
 ## 4. 典型 Agent 工作流
@@ -350,6 +359,9 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/graph
 | 5 | 1.0.0 | **品牌更名 PaperGraph → PaperWeave**：鉴权头改为 `X-PaperWeave-Token`，环境变量 `PAPERWEAVE_S2_API_KEY`，MCP Server 更名 `paperweave-mcp.js`（工具前缀 `paperweave_`），数据目录 `paperweave-data`（首次启动自动从旧 `papergraph-data` 迁移）；默认初始论文库名改为 `New Weave`；GUI：新增相似论文区（文献耦合 × 同被引 Top 5）与「库外发现」面板（经典先驱 / 衍生新作聚合推荐，一键下载入库）；新品牌 Logo 全面实装 |
 | 6 | 1.2.0 | 多链接导入与 `download-all-refs` 改为自适应并行（初始 3、范围 1–6，按网络反馈与 429 调整）；进度对象新增可选 `active / pending / concurrency / failed`；并发导入增加哈希复核；PDF 参考文献提取修复扩窗页序，支持无编号条目、机构作者和附录截断，旧论文抓取时可从本地 PDF 按需重建；阅读器与 3D 节点侧栏同步显示抓取／下载进度 |
 | 6（HTTP 不变） | 1.2.0 | GUI：3D 引用图谱新增按发表年份排布的时间线视图，同年节点纵向避让，未知年份独立成列；支持年份下拉跳转、前后年份导航、缩放与适配全图，并保留筛选、选中、多选和节点详情交互 |
+| 6（HTTP 不变） | 1.2.0 | GUI：时间线重新设计为二维研究发展史视图，固定字号 HTML 年份标尺随相机定位并禁止三维旋转；论文详情新增完整上下游发展史，递归展示参考文献与被引脉络、排除旁支并支持一键恢复完整图谱 |
+| 7 | 1.2.0 | 浏览器插件新增 `POST /api/connector/pair`：自动发现本地桌面端，扩展来源经桌面端一次性授权后获取令牌，无需手动配置 API Key；普通网页配对请求被拒绝；GUI 年份标尺与时间线节点避让详情栏，批量与导入按钮归入各论文库工具栏 |
+| 7（HTTP 不变） | 1.2.0 | GUI：全部下拉菜单统一圆角、自定义箭头与焦点样式；时间线普通滚轮整体缩放，Shift+滚轮横向缩放，Ctrl+滚轮纵向缩放；论文标签固定 24px，采用长标题截断、上下交错与优先级碰撞检测避免重叠 |
 
 > **维护者注意**：新增/修改接口或数据字段时，必须同步更新本文件并递增 API 版本号；
 > 本文件位于源码仓库 `agents/AGENTS.md`，打包时随应用分发（安装版在 `resources/AGENTS.md`，

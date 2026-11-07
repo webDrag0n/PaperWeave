@@ -62,25 +62,24 @@ function renderPaper(meta) {
 
 async function refresh() {
   applyI18n();
-  const cfg = await chrome.storage.sync.get(['serverUrl', 'token']);
-  if (!cfg.token) {
-    show('setupView');
-    $('#connStatus').textContent = S('未配置', 'Not configured');
-    $('#connDot').className = 'conn-dot err';
-    return;
-  }
-
-  // 连接状态
+  $('#pairBtn').disabled = false;
   const pong = await chrome.runtime.sendMessage({ type: 'pw:ping' });
   if (pong && pong.ok && pong.authed) {
     $('#connDot').className = 'conn-dot ok';
     $('#connStatus').textContent = S(`已连接 · 库内 ${pong.status ? pong.status.papers : '?'} 篇`, `Connected · ${pong.status ? pong.status.papers : '?'} papers`);
-  } else if (pong && pong.ok) {
-    $('#connDot').className = 'conn-dot err';
-    $('#connStatus').textContent = S('已连接，但令牌无效', 'Connected, token invalid');
   } else {
+    show('setupView');
     $('#connDot').className = 'conn-dot err';
-    $('#connStatus').textContent = (pong && pong.error) || S('未连接', 'Disconnected');
+    if (pong && pong.ok) {
+      $('#setupText').textContent = pong.authError
+        ? S('桌面端连接已失效，请重新授权', 'Desktop authorization expired. Please reconnect')
+        : S('已发现本地 PaperWeave，点击即可连接', 'PaperWeave detected. Click to connect');
+      $('#connStatus').textContent = S('等待一键授权', 'Waiting for authorization');
+    } else {
+      $('#setupText').textContent = S('未发现本地 PaperWeave，请先打开桌面端', 'PaperWeave was not detected. Open the desktop app first');
+      $('#connStatus').textContent = (pong && pong.error) || S('未连接', 'Disconnected');
+    }
+    return;
   }
 
   // 识别当前页面
@@ -90,6 +89,21 @@ async function refresh() {
   if (meta && (meta.pdfUrl || meta.title)) renderPaper(meta);
   else show('noPaperView');
 }
+
+$('#pairBtn').addEventListener('click', async () => {
+  const btn = $('#pairBtn');
+  btn.disabled = true;
+  $('#setupText').textContent = S('正在连接，请在桌面端确认授权…', 'Connecting. Approve the request in the desktop app…');
+  $('#connStatus').textContent = S('等待桌面端确认', 'Waiting for desktop approval');
+  const result = await chrome.runtime.sendMessage({ type: 'pw:pair' });
+  if (result && result.ok && result.authed) {
+    await refresh();
+  } else {
+    btn.disabled = false;
+    $('#setupText').textContent = (result && result.error) || S('连接失败，请重试', 'Connection failed. Please retry');
+    $('#connStatus').textContent = S('尚未完成授权', 'Not authorized');
+  }
+});
 
 $('#saveBtn').addEventListener('click', async () => {
   if (!currentMeta) return;

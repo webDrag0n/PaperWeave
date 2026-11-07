@@ -1,5 +1,5 @@
 // PaperWeave Agent HTTP API：内嵌在本地的智能体操作接口
-// 默认监听 127.0.0.1:24680（占用时自动递增），除 /api/ping 外均需 X-PaperWeave-Token 鉴权
+// 默认监听 127.0.0.1:24680（占用时自动递增）；ping 与插件配对请求公开，其余接口需 X-PaperWeave-Token
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -36,7 +36,9 @@ function json(res, status, obj) {
 
 // onChanged(): 数据变更后通知渲染进程刷新
 // refsProgress: 进度 Map；onProgress(paperId): 生成进度回调
-function startAgentApi({ store, service, token, appVersion, onChanged, refsProgress, onProgress }) {
+// onConnectorPair(request): 桌面端确认浏览器插件配对，返回是否允许
+function startAgentApi({ store, service, token, appVersion, onChanged, refsProgress, onProgress, onConnectorPair }) {
+  let pairPending = false;
   const paperPublic = (p) => (p ? { ...p, refText: undefined } : null);
   const progressOf = (paperId) => (refsProgress && refsProgress.get(paperId)) || null;
   const progressFn = (paperId) => (onProgress ? onProgress(paperId) : undefined);
@@ -53,8 +55,29 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
 
     // 公共探活
     if (u.pathname === '/api/ping') {
-      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 6 });
+      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 7 });
     }
+
+    // 浏览器插件配对：仅扩展来源可发起，必须由桌面端明确批准。
+    if (u.pathname === '/api/connector/pair' && req.method === 'POST') {
+      const origin = String(req.headers.origin || '');
+      if (!/^(chrome|moz)-extension:\/\//i.test(origin)) {
+        return json(res, 403, { ok: false, error: '仅浏览器扩展可以请求配对' });
+      }
+      if (!onConnectorPair) return json(res, 503, { ok: false, error: '当前桌面端不支持插件配对' });
+      if (pairPending) return json(res, 409, { ok: false, error: '已有配对请求等待确认' });
+      pairPending = true;
+      try {
+        const raw = (await readBody(req, 16 * 1024)).toString('utf-8') || '{}';
+        const body = JSON.parse(raw);
+        const approved = await onConnectorPair({ origin, client: String(body.client || 'PaperWeave Connector').slice(0, 100) });
+        if (!approved) return json(res, 403, { ok: false, error: '用户拒绝了连接请求' });
+        return json(res, 200, { ok: true, data: { token } });
+      } finally {
+        pairPending = false;
+      }
+    }
+
     // 鉴权
     if (req.headers['x-paperweave-token'] !== token) {
       return json(res, 401, { ok: false, error: '缺少或错误的 X-PaperWeave-Token' });

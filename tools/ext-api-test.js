@@ -31,9 +31,12 @@ const service = {
 };
 
 (async () => {
+  let pairApproved = true;
+  const pairRequests = [];
   const started = await startAgentApi({
     store, service, token: 'testtoken123', appVersion: 'test',
     onChanged: () => {}, refsProgress: new Map(), onProgress: null,
+    onConnectorPair: async (request) => { pairRequests.push(request); return pairApproved; },
   });
   if (!started) { console.error('FAIL: server not started'); process.exit(1); }
   const base = `http://127.0.0.1:${started.port}`;
@@ -43,7 +46,7 @@ const service = {
   // 1. ping 无需鉴权 + CORS 头
   let res = await fetch(base + '/api/ping');
   let body = await res.json();
-  check('ping ok', body.ok && body.api === 5);
+  check('ping ok', body.ok && body.api === 7);
   check('ping CORS header', res.headers.get('access-control-allow-origin') === '*');
 
   // 2. OPTIONS 预检
@@ -51,7 +54,25 @@ const service = {
   check('OPTIONS 204', res.status === 204);
   check('OPTIONS allow-headers 含 token 头', /x-paperweave-token/i.test(res.headers.get('access-control-allow-headers') || ''));
 
-  // 3. 无令牌 → 401
+  // 3. 插件配对：仅扩展来源可请求，桌面端批准后才返回令牌
+  res = await fetch(base + '/api/connector/pair', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://example.com' }, body: '{}',
+  });
+  check('普通网页配对被拒绝', res.status === 403);
+  pairApproved = false;
+  res = await fetch(base + '/api/connector/pair', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'chrome-extension://test' }, body: JSON.stringify({ client: 'PaperWeave Connector' }),
+  });
+  check('桌面端拒绝配对不返回令牌', res.status === 403);
+  pairApproved = true;
+  res = await fetch(base + '/api/connector/pair', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'chrome-extension://test' }, body: JSON.stringify({ client: 'PaperWeave Connector' }),
+  });
+  body = await res.json();
+  check('桌面端批准配对返回令牌', res.status === 200 && body.ok && body.data && body.data.token === 'testtoken123');
+  check('配对请求仅进入授权回调两次', pairRequests.length === 2 && pairRequests.every(r => r.origin === 'chrome-extension://test'));
+
+  // 4. 无令牌 → 401
   res = await fetch(base + '/api/papers/import-web', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'https://arxiv.org/abs/1706.03762' }),
   });

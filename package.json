@@ -22,7 +22,7 @@
     "dist:linux": "node tools/build.js --linux",
     "dist:all": "node tools/build.js --win --mac --linux",
     "apitest": "node tools/api-test.js",
-    "exttest": "node tools/ext-api-test.js",
+    "exttest": "node tools/ext-api-test.js && node tools/connector-background-test.js",
     "pack:ext": "node tools/pack-extension.js",
     "mcptest": "node tools/mcp-test.js"
   },

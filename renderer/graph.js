@@ -75,7 +75,7 @@ function pathRingTexture() {
 
 // 标题支持行内 Markdown（**粗体** / *斜体* / `代码` / ~~删除线~~）：逐段切换字体绘制
 function makeLabelSprite(text, theme) {
-  const maxChars = 42;
+  const maxChars = 18;
   const t = text.length > maxChars ? text.slice(0, maxChars - 1) + '…' : text;
   const segs = parseInlineMd(t);
   const fontOf = (s) => (s.code
@@ -122,6 +122,9 @@ function makeLabelSprite(text, theme) {
   const sprite = new THREE.Sprite(mat);
   const s = 0.042;
   sprite.scale.set(cv.width * s, cv.height * s, 1);
+  sprite.userData.baseScaleX = cv.width * s;
+  sprite.userData.baseScaleY = cv.height * s;
+  sprite.userData.aspect = cv.width / cv.height;
   return sprite;
 }
 
@@ -143,6 +146,7 @@ export class GraphView {
     this.viewMode = opts.viewMode === 'timeline' ? 'timeline' : 'network';
     this.timelineColumns = [];
     this.activeTimelineKey = null;
+    this.timelineScale = { x: 1, y: 1 };
     this.nodes = [];   // {id,paper,mesh,glow,label,pos,vel,degree}
     this.edges = [];   // {link,a,b,line,pulse,phase,pulseBase}
     this.selectedIds = [];  // 多选集合（有序，最后一个为主选中）
@@ -181,6 +185,7 @@ export class GraphView {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
+    this._updateControlMode();
 
     this.raycaster = new THREE.Raycaster();
     this.raycaster.params.Points = { threshold: 2 };
@@ -197,6 +202,7 @@ export class GraphView {
     el.addEventListener('pointermove', (e) => this._onMove(e));
     el.addEventListener('click', (e) => this._onClick(e));
     el.addEventListener('dblclick', (e) => this._onDblClick(e));
+    el.addEventListener('wheel', (e) => this._onWheel(e), { capture: true, passive: false });
     el.addEventListener('pointerdown', (e) => {
       this._downPos = { x: e.clientX, y: e.clientY, t: performance.now() };
     });
@@ -295,11 +301,20 @@ export class GraphView {
     if (this._built) this.renderer.render(this.scene, this.camera);
   }
 
+  _updateControlMode() {
+    const timeline = this.viewMode === 'timeline';
+    this.controls.enableRotate = !timeline;
+    this.controls.screenSpacePanning = true;
+    this.controls.mouseButtons.LEFT = timeline ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+    this.controls.touches.ONE = timeline ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE;
+  }
+
   setViewMode(mode) {
     const next = mode === 'timeline' ? 'timeline' : 'network';
     if (next === this.viewMode) return;
     this.viewMode = next;
     if (!this._built) return;
+    this._updateControlMode();
     this._layout();
     this._fitCamera(false);
     this._recolor();
@@ -310,8 +325,8 @@ export class GraphView {
     const column = this.timelineColumns.find(c => c.key === key);
     if (!column) return false;
     this.activeTimelineKey = key;
-    const yearNodes = this.nodes.filter(n => Math.abs(n.pos.x - column.x) < 0.001);
-    const center = new THREE.Vector3(column.x, 0, 0);
+    const yearNodes = this.nodes.filter(n => n.timelineBase && Math.abs(n.timelineBase.x - column.x) < 0.001);
+    const center = new THREE.Vector3(column.x * this.timelineScale.x, 0, 0);
     if (yearNodes.length) {
       center.y = yearNodes.reduce((sum, n) => sum + n.pos.y, 0) / yearNodes.length;
     }
@@ -321,7 +336,7 @@ export class GraphView {
     const fitHeight = (maxY - minY + 36) / (2 * Math.tan(halfFov)) * 1.12;
     const currentDist = this.camera.position.distanceTo(this.controls.target);
     const dist = Math.max(55, Math.min(currentDist, fitHeight));
-    this._tweenCam(new THREE.Vector3(center.x, center.y + dist * 0.12, center.z + dist), center, 500);
+    this._tweenCam(new THREE.Vector3(center.x, center.y, center.z + dist), center, 500);
     return true;
   }
 
@@ -341,17 +356,158 @@ export class GraphView {
     this._tweenCam(target.clone().add(offset), target, 260);
   }
 
+  _onWheel(e) {
+    if (this.viewMode !== 'timeline') return;
+    const axis = e.shiftKey ? 'x' : (e.ctrlKey ? 'y' : null);
+    if (!axis) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const next = Math.max(0.2, Math.min(8, this.timelineScale[axis] * factor));
+    if (Math.abs(next - this.timelineScale[axis]) < 1e-6) return;
+    this.timelineScale[axis] = next;
+    this._applyTimelineScale();
+  }
+
+  _applyTimelineScale() {
+    const { x: sx, y: sy } = this.timelineScale;
+    for (const nd of this.nodes) {
+      if (!nd.timelineBase) continue;
+      nd.pos.set(nd.timelineBase.x * sx, nd.timelineBase.y * sy, 0);
+      this._positionNodeLabel(nd);
+    }
+    this.timelineGroup.children.forEach((line, index) => {
+      const column = this.timelineColumns[index];
+      if (!column) return;
+      line.geometry.setFromPoints([
+        new THREE.Vector3(column.x * sx, this.timelineMinY * sy - 10, -2),
+        new THREE.Vector3(column.x * sx, this.timelineLabelY * sy - 4, -2),
+      ]);
+    });
+    this._updateEdges();
+    this._recolor();
+    this._updateLabelScales();
+    this._positionTimelineRuler();
+  }
+
+  _updateLabelScales() {
+    if (!this.opts.wrap) return;
+    const viewportHeight = Math.max(1, this.opts.wrap.clientHeight);
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
+    for (const nd of this.nodes) {
+      if (!nd.label) continue;
+      if (this.viewMode !== 'timeline') {
+        nd.label.scale.set(nd.label.userData.baseScaleX, nd.label.userData.baseScaleY, 1);
+        continue;
+      }
+      const distance = Math.max(0.1, this.camera.position.distanceTo(nd.label.position));
+      const worldPerPixel = 2 * distance * Math.tan(halfFov) / viewportHeight;
+      nd.label.scale.set(24 * nd.label.userData.aspect * worldPerPixel, 24 * worldPerPixel, 1);
+    }
+  }
+
+  _positionNodeLabel(nd) {
+    if (!nd.label) return;
+    const side = this.nodes.indexOf(nd) % 2 === 0 ? 1 : -1;
+    nd.label.position.copy(nd.pos).add(new THREE.Vector3(0, side * (nd.mesh.geometry.parameters.radius + 7), 0));
+  }
+
+  _updateLabelVisibility() {
+    const selected = new Set(this.selectedIds);
+    const wrap = this.opts.wrap;
+    const items = this.nodes.filter(nd => nd.label).map(nd => {
+      const point = nd.label.position.clone().project(this.camera);
+      return {
+        nd,
+        x: (point.x * 0.5 + 0.5) * wrap.clientWidth,
+        y: (-point.y * 0.5 + 0.5) * wrap.clientHeight,
+        z: point.z,
+        w: 24 * nd.label.userData.aspect + 8,
+        h: 32,
+      };
+    });
+    if (this.viewMode !== 'timeline') {
+      for (const item of items) item.nd.label.visible = true;
+      return;
+    }
+    const priority = (item) => item.nd.id === this.hoverId ? 0 : (selected.has(item.nd.id) ? 1 : 2);
+    items.sort((a, b) => priority(a) - priority(b) || b.nd.degree - a.nd.degree);
+    const accepted = [];
+    for (const item of items) {
+      const offscreen = item.z < -1 || item.z > 1 || item.x + item.w / 2 < 0 || item.x - item.w / 2 > wrap.clientWidth || item.y + item.h / 2 < 0 || item.y - item.h / 2 > wrap.clientHeight;
+      const overlaps = accepted.some(other => Math.abs(item.x - other.x) < (item.w + other.w) / 2 && Math.abs(item.y - other.y) < (item.h + other.h) / 2);
+      item.nd.label.visible = !offscreen && !overlaps;
+      if (item.nd.label.visible) accepted.push(item);
+    }
+  }
+
   fitView() {
     if (this._built) this._fitCamera(false);
   }
 
   _clearTimeline() {
     this.timelineColumns = [];
+    const ruler = this.opts.timelineRulerEl;
+    if (ruler) {
+      ruler.innerHTML = '';
+      ruler.classList.add('hidden');
+    }
     if (!this.timelineGroup) return;
     while (this.timelineGroup.children.length) {
       const child = this.timelineGroup.children.pop();
       disposeObj(child);
       this.timelineGroup.remove(child);
+    }
+  }
+
+  _buildTimelineRuler() {
+    const ruler = this.opts.timelineRulerEl;
+    if (!ruler) return;
+    ruler.innerHTML = '';
+    ruler.classList.remove('hidden');
+    for (const column of this.timelineColumns) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = column.label;
+      button.dataset.yearKey = column.key;
+      button.title = column.year === null ? t('查看未知年份论文') : t('跳转到 {year} 年').replace('{year}', String(column.year));
+      button.classList.toggle('active', column.key === this.activeTimelineKey);
+      button.addEventListener('click', () => {
+        if (this.focusTimelineYear(column.key) && this.opts.onTimelineYear) this.opts.onTimelineYear(column.key);
+      });
+      ruler.appendChild(button);
+    }
+    this._positionTimelineRuler();
+  }
+
+  _positionTimelineRuler() {
+    const ruler = this.opts.timelineRulerEl;
+    if (!ruler || this.viewMode !== 'timeline' || !this.timelineColumns.length) return;
+    const wrap = this.opts.wrap;
+    const projected = this.timelineColumns.map((column, index) => {
+      const point = new THREE.Vector3(column.x * this.timelineScale.x, this.timelineLabelY * this.timelineScale.y, 0).project(this.camera);
+      return {
+        index,
+        key: column.key,
+        x: (point.x * 0.5 + 0.5) * wrap.clientWidth - ruler.offsetLeft,
+        onScreen: point.z >= -1 && point.z <= 1,
+      };
+    });
+    const gaps = projected.slice(1).map((p, i) => Math.abs(p.x - projected[i].x)).filter(gap => gap > 0.01);
+    const minGap = gaps.length ? Math.min(...gaps) : 60;
+    const stride = Math.max(1, Math.ceil(64 / minGap));
+    let lastShownX = -Infinity;
+    for (const point of projected) {
+      const button = ruler.children[point.index];
+      if (!button) continue;
+      const onScreen = point.onScreen && point.x >= -30 && point.x <= ruler.clientWidth + 30;
+      const important = point.index === 0 || point.index === projected.length - 1 || point.index % stride === 0;
+      let visible = onScreen && (point.key === this.activeTimelineKey || important);
+      if (visible && point.key !== this.activeTimelineKey && point.x - lastShownX < 58) visible = false;
+      button.classList.toggle('hidden', !visible);
+      button.classList.toggle('active', point.key === this.activeTimelineKey);
+      button.style.left = `${point.x}px`;
+      if (visible) lastShownX = point.x;
     }
   }
 
@@ -362,10 +518,14 @@ export class GraphView {
   }
 
   _layoutTimeline() {
+    this.timelineScale = { x: 1, y: 1 };
     const layout = computeTimelineLayout(this.nodes.map(node => node.paper), { unknownLabel: t('未知年份') });
     for (const node of this.nodes) {
       const pos = layout.positions.get(node.id);
-      if (pos) node.pos.set(pos.x, pos.y, pos.z);
+      if (pos) {
+        node.timelineBase = { x: pos.x, y: pos.y };
+        node.pos.set(pos.x, pos.y, pos.z);
+      }
       node.vel.set(0, 0, 0);
     }
     this._clearTimeline();
@@ -373,6 +533,8 @@ export class GraphView {
     if (!layout.columns.some(c => c.key === this.activeTimelineKey)) {
       this.activeTimelineKey = layout.columns.length ? layout.columns[0].key : null;
     }
+    this.timelineMinY = layout.minY;
+    this.timelineLabelY = layout.yearLabelY;
     for (const column of layout.columns) {
       const line = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([
@@ -381,11 +543,10 @@ export class GraphView {
         ]),
         new THREE.LineBasicMaterial({ color: this.T.edgeBase, transparent: true, opacity: 0.22 }),
       );
-      const label = makeLabelSprite(column.label, this.T);
-      label.position.set(column.x, layout.yearLabelY, 0);
-      this.timelineGroup.add(line, label);
+      this.timelineGroup.add(line);
     }
-    this._updateEdges();
+    this._buildTimelineRuler();
+    this._applyTimelineScale();
   }
 
   _layout() {
@@ -441,18 +602,28 @@ export class GraphView {
 
   _fitCamera(instant) {
     if (!this.nodes.length) { this.camera.position.set(0, 0, 160); return; }
+    if (this.viewMode === 'timeline') {
+      this.timelineScale = { x: 1, y: 1 };
+      this._applyTimelineScale();
+    }
     const box = new THREE.Box3();
     for (const nd of this.nodes) box.expandByPoint(nd.pos);
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
+    const wrap = this.opts.wrap;
+    const sideOpen = this.viewMode === 'timeline' && this.opts.sideEl && !this.opts.sideEl.classList.contains('hidden');
+    const sideWidth = sideOpen ? Math.min(336, wrap.clientWidth * 0.35) : 0;
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
     let dist = Math.max(70, size.length() * 1.15);
     if (this.viewMode === 'timeline') {
-      const halfFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
+      const availableAspect = Math.max(0.5, (wrap.clientWidth - sideWidth) / wrap.clientHeight);
       const fitHeight = (size.y + 36) / (2 * Math.tan(halfFov));
-      const fitWidth = (size.x + 44) / (2 * Math.tan(halfFov) * Math.max(0.5, this.camera.aspect));
+      const fitWidth = (size.x + 44) / (2 * Math.tan(halfFov) * availableAspect);
       dist = Math.max(70, fitHeight, fitWidth) * 1.16;
+      if (sideWidth) center.x += (sideWidth / wrap.clientWidth) * dist * Math.tan(halfFov) * this.camera.aspect;
     }
-    const toPos = new THREE.Vector3(center.x, center.y + dist * 0.12, center.z + dist);
+    const tilt = this.viewMode === 'timeline' ? 0 : 0.12;
+    const toPos = new THREE.Vector3(center.x, center.y + dist * tilt, center.z + dist);
     if (instant) {
       this.camera.position.copy(toPos);
       this.controls.target.copy(center);
@@ -584,7 +755,7 @@ export class GraphView {
         nd.label = makeLabelSprite(nd.paper.title || '未命名', T);
         this.labelGroup.add(nd.label);
       }
-      nd.label.position.copy(nd.pos).add(new THREE.Vector3(0, nd.mesh.geometry.parameters.radius + 4.5, 0));
+      this._positionNodeLabel(nd);
     }
 
     // 边：两端都在 N 跳内的高亮，颜色取较深一端的跳色
@@ -700,7 +871,8 @@ export class GraphView {
     const nd = this.nodes.find(n => n.id === id);
     if (!nd) return;
     const dist = 60;
-    const toPos = new THREE.Vector3(nd.pos.x, nd.pos.y + dist * 0.25, nd.pos.z + dist);
+    const tilt = this.viewMode === 'timeline' ? 0 : 0.25;
+    const toPos = new THREE.Vector3(nd.pos.x, nd.pos.y + dist * tilt, nd.pos.z + dist);
     this._tweenCam(toPos, nd.pos.clone());
   }
 
@@ -729,6 +901,9 @@ export class GraphView {
       e.pulse.material.opacity = (e.pulseBase ?? 0.5) * Math.sin(Math.PI * t);
     }
     this.controls.update();
+    this._updateLabelScales();
+    this._updateLabelVisibility();
+    this._positionTimelineRuler();
     this.renderer.render(this.scene, this.camera);
   }
 

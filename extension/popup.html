@@ -13,11 +13,13 @@
   </header>
 
   <main>
-    <!-- 未配置 -->
+    <!-- 自动发现与一键授权 -->
     <section id="setupView" class="hidden">
       <div class="empty-icon">🧩</div>
-      <p class="empty-text" data-zh="首次使用请先完成连接设置" data-en="Set up the connection first">首次使用请先完成连接设置</p>
-      <button id="openOptions1" class="btn btn-primary" data-zh="⚙ 打开设置" data-en="⚙ Open settings">⚙ 打开设置</button>
+      <p id="setupText" class="empty-text" data-zh="正在检测本地 PaperWeave…" data-en="Detecting PaperWeave…">正在检测本地 PaperWeave…</p>
+      <p class="empty-sub" data-zh="无需填写 API Key。首次连接时，请在桌面端允许一次授权。" data-en="No API key required. Approve the first connection in the desktop app.">无需填写 API Key。首次连接时，请在桌面端允许一次授权。</p>
+      <button id="pairBtn" class="btn btn-primary" data-zh="连接 PaperWeave" data-en="Connect PaperWeave">连接 PaperWeave</button>
+      <button id="openOptions1" class="link-btn" data-zh="高级连接设置" data-en="Advanced connection settings">高级连接设置</button>
     </section>
 
     <!-- 识别到论文 -->

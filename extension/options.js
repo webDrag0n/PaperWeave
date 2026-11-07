@@ -9,9 +9,10 @@ document.querySelectorAll('[data-zh]').forEach(el => {
 });
 
 async function load() {
-  const cfg = await chrome.storage.sync.get(['serverUrl', 'token']);
-  $('#serverUrl').value = cfg.serverUrl || 'http://127.0.0.1:24680';
-  $('#token').value = cfg.token || '';
+  const local = await chrome.storage.local.get(['serverUrl', 'token']);
+  const legacy = await chrome.storage.sync.get(['serverUrl', 'token']);
+  $('#serverUrl').value = local.serverUrl || legacy.serverUrl || 'http://127.0.0.1:24680';
+  $('#token').value = local.token || legacy.token || '';
 }
 
 function setStatus(text, ok) {
@@ -23,7 +24,7 @@ function setStatus(text, ok) {
 $('#saveBtn').addEventListener('click', async () => {
   const serverUrl = $('#serverUrl').value.trim().replace(/\/+$/, '') || 'http://127.0.0.1:24680';
   const token = $('#token').value.trim();
-  await chrome.storage.sync.set({ serverUrl, token });
+  await chrome.storage.local.set({ serverUrl, token });
   setStatus(S('✓ 已保存', '✓ Saved'), true);
 });
 
@@ -31,7 +32,7 @@ $('#testBtn').addEventListener('click', async () => {
   // 先保存再测，保证测的是当前输入
   const serverUrl = $('#serverUrl').value.trim().replace(/\/+$/, '') || 'http://127.0.0.1:24680';
   const token = $('#token').value.trim();
-  await chrome.storage.sync.set({ serverUrl, token });
+  await chrome.storage.local.set({ serverUrl, token });
   setStatus(S('测试中…', 'Testing…'), true);
   const r = await chrome.runtime.sendMessage({ type: 'pw:ping' });
   if (r && r.ok && r.authed) {

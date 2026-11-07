@@ -50,3 +50,37 @@ export function computeTimelineLayout(papers, options = {}) {
   const maxY = maxRows > 1 ? (maxRows - 1) * rowGap / 2 : 0;
   return { positions, columns, yearLabelY: maxY + 14, minY: maxY === 0 ? 0 : -maxY, maxY };
 }
+
+
+/**
+ * 收集论文的完整上下游谱系。
+ * from → to 表示“from 引用 to”；参考文献方向为上游，被引方向为下游。
+ */
+export function collectLineageIds(links, selectedId) {
+  const references = new Map();
+  const citations = new Map();
+  const add = (map, key, value) => {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(value);
+  };
+  for (const link of links) {
+    add(references, link.from, link.to);
+    add(citations, link.to, link.from);
+  }
+  const walk = (start, adjacency) => {
+    const visited = new Set();
+    const queue = [start];
+    while (queue.length) {
+      const current = queue.shift();
+      for (const next of adjacency.get(current) || []) {
+        if (next === start || visited.has(next)) continue;
+        visited.add(next);
+        queue.push(next);
+      }
+    }
+    return visited;
+  };
+  const upstream = walk(selectedId, references);
+  const downstream = walk(selectedId, citations);
+  return { upstream, downstream, ids: new Set([selectedId, ...upstream, ...downstream]) };
+}

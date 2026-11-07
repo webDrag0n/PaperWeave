@@ -4,6 +4,7 @@ import { PdfViewer } from './pdfviewer.js';
 import { CitationPopup } from './citation-popup.js';
 import { GraphView, graphThemePalette } from './graph.js';
 import { computeSimEdges, topSimilar, aggregateExternal } from './similarity.js';
+import { collectLineageIds } from './graph-layout.js';
 import { renderMarkdown, inlineMd } from './markdown.js';
 import { t, tf, applyI18n, getLang, setLangStorage } from './i18n.js';
 
@@ -16,6 +17,7 @@ const state = {
   view: 'library',          // library | reader | graph
   readerPaperId: null,
   graphSelectedId: null,
+  graphLineageId: null,
   search: '',
   annots: [],
   bulkMode: false,
@@ -481,6 +483,12 @@ function closeGraph() {
 }
 
 function syncGraphModeButtons() {
+  $('#graphView').classList.toggle('timeline-active', state.graphViewMode === 'timeline');
+  const legendTip = $('#graphLegend .legend-tip');
+  legendTip.dataset.i18n = state.graphViewMode === 'timeline'
+    ? '拖动平移 · 滚轮缩放 · Shift 横向 · Ctrl 纵向 · 单击选中 · Shift+点击多选 · 双击打开 · Esc 返回'
+    : '拖动旋转 · 滚轮缩放 · 单击选中 · Shift+点击多选 · 双击打开 · Esc 返回';
+  legendTip.textContent = t(legendTip.dataset.i18n);
   $$('[data-graph-mode]').forEach(button => {
     const active = button.dataset.graphMode === state.graphViewMode;
     button.classList.toggle('active', active);
@@ -531,11 +539,26 @@ function showView(name) {
   }
 }
 
-/* 图谱星级过滤：按最低评星过滤节点与关联边，选中节点被过滤掉时清除选中 */
+function syncLineageBar(lineage) {
+  const center = state.graphLineageId && paperById(state.graphLineageId);
+  const active = !!(center && lineage);
+  $('#graphView').classList.toggle('lineage-active', active);
+  $('#graphLineageBar').classList.toggle('hidden', !active);
+  if (active) {
+    $('#graphLineageText').textContent = `《${center.title || '未命名论文'}》 · 上游 ${lineage.upstream.size} · 下游 ${lineage.downstream.size}`;
+  }
+}
+
+/* 图谱过滤：星级与单篇论文完整上下游发展史可组合，选中节点被过滤掉时清除选中 */
 function applyGraphFilter() {
   if (!graph) return;
   const min = state.graphMinRating === 'all' ? null : parseInt(state.graphMinRating, 10);
-  const papers = min === null ? state.papers : state.papers.filter(p => (typeof p.rating === 'number' ? p.rating : 1) >= min);
+  let papers = min === null ? [...state.papers] : state.papers.filter(p => (typeof p.rating === 'number' ? p.rating : 1) >= min);
+  let lineage = null;
+  if (state.graphLineageId) {
+    lineage = collectLineageIds(state.links, state.graphLineageId);
+    papers = papers.filter(p => lineage.ids.has(p.id));
+  }
   const ids = new Set(papers.map(p => p.id));
   const links = state.links.filter(l => ids.has(l.from) && ids.has(l.to));
   if (state.graphSelectedId && !ids.has(state.graphSelectedId)) {
@@ -550,6 +573,7 @@ function applyGraphFilter() {
   $('#graphHopCtl').classList.toggle('hidden', !(graph && graph.selectedIds.length));
   $('#graphEmpty').classList.toggle('hidden', papers.length > 0);
   syncTimelineControls();
+  syncLineageBar(lineage);
 }
 
 /* ---------------- 论文库 ---------------- */
@@ -1596,6 +1620,9 @@ function ensureGraph() {
   graph = new GraphView({
     wrap: $('#graphCanvasWrap'),
     tooltipEl: $('#graphTooltip'),
+    sideEl: $('#graphSide'),
+    timelineRulerEl: $('#graphTimelineRuler'),
+    onTimelineYear: () => syncTimelineControls(),
     theme: localStorage.getItem('pg-theme') || 'dark',
     viewMode: state.graphViewMode,
     onSelect: (primaryId, selectedIds) => {
@@ -1895,6 +1922,22 @@ function bindEvents() {
   $('#graphZoomIn').addEventListener('click', () => { if (graph) graph.zoomView(0.8); });
   $('#graphZoomOut').addEventListener('click', () => { if (graph) graph.zoomView(1.25); });
   $('#graphZoomFit').addEventListener('click', () => { if (graph) graph.fitView(); });
+  $('#graphSideLineage').addEventListener('click', () => {
+    if (!graph || !state.graphSelectedId) return;
+    state.graphLineageId = state.graphSelectedId;
+    state.graphViewMode = 'timeline';
+    state.graphMinRating = 'all';
+    localStorage.setItem('pg-graph-view-mode', state.graphViewMode);
+    localStorage.setItem('pg-graph-min-rating', state.graphMinRating);
+    $('#graphMinRating').value = 'all';
+    graph.setViewMode('timeline');
+    syncGraphModeButtons();
+    applyGraphFilter();
+  });
+  $('#graphLineageClear').addEventListener('click', () => {
+    state.graphLineageId = null;
+    applyGraphFilter();
+  });
   $('#graphMinRating').addEventListener('change', (e) => {
     state.graphMinRating = e.target.value;
     localStorage.setItem('pg-graph-min-rating', state.graphMinRating);
@@ -1913,7 +1956,7 @@ function bindEvents() {
     if (state.view === 'graph' && graph) {
       const q = state.search.trim().toLowerCase();
       if (q) {
-        const hit = state.papers.find(p => (p.title || '').toLowerCase().includes(q));
+        const hit = graph.nodes.map(n => n.paper).find(p => (p.title || '').toLowerCase().includes(q));
         if (hit) { graph.focusNode(hit.id); graph.select(hit.id); showGraphSide(hit.id); state.graphSelectedId = hit.id; }
       }
     }
