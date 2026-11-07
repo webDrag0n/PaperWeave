@@ -8,11 +8,11 @@
 
 [English](README.en.md) | 中文
 
-[![版本](https://img.shields.io/badge/版本-1.0.0-4aa3ff)](release/)
+[![版本](https://img.shields.io/badge/版本-1.2.0-4aa3ff)](release/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![平台](https://img.shields.io/badge/平台-Windows%20%7C%20macOS%20%7C%20Linux-b678ff)](#-下载)
 [![Electron](https://img.shields.io/badge/Electron-33-5b6270)](package.json)
-[![自测](https://img.shields.io/badge/自测-161%20%2B%2047%20%2B%2049%20项通过-7bf1a8)](#-测试与质量)
+[![自测](https://img.shields.io/badge/自测-189%20%2B%2048%20%2B%2049%20项通过-7bf1a8)](#-测试与质量)
 
 ![3D 引用关系图](README.assets/graph.png)
 
@@ -60,7 +60,7 @@ PaperWeave 是为「读论文 + 理脉络」而生的桌面工具：它不只是
 ### ⭐ 论文库管理
 
 - **多论文库**：左侧论文库面板（可展开/缩回）以卡片管理多个论文库——卡片显示名称与简介（点击 ✎ 直接编辑）、★ 星标置顶、拖动排序、删除需输入完整名称确认；默认初始库名称为 `New Graph`
-- **统一导入**：一个「📥 导入」弹窗同时支持粘贴链接（PDF 直链 / arXiv）、拖入文件、点击打开文件管理器多选
+- **统一导入**：一个「📥 导入」弹窗同时支持粘贴链接（PDF 直链 / arXiv）、拖入文件、点击打开文件管理器多选；多链接自适应并行下载，实时显示完成数、等待数与当前并发
 - **统一论文存储**：同一篇论文全局仅存一份（唯一 id 跨库复用），论文库只记录包含哪些论文及库内引用关联
 - **智能去重**：导入时内容 hash 命中直接复用；DOI 相同（可能不同版本）或标题高度相似时**弹窗请你确认**——复用已有论文或作为新论文导入
 - **自动元数据**：标题 / 作者 / DOI / 摘要 / 参考文献段落自动提取
@@ -81,10 +81,10 @@ PaperWeave 是为「读论文 + 理脉络」而生的桌面工具：它不只是
 
 ### 🔗 引用关系引擎
 
-- **导入即解析**：任何论文入库后自动后台解析引用关系，不打断当前操作
-- **抓取引用（参考文献）**：优先 Semantic Scholar 结构化参考文献（分页拉取，最准最全）；未收录时回退解析 PDF 参考文献段落（支持 `[1]` / `1.` / `[Vaswani+17]` / 无编号列表，自动去重），逐条经 DOI（CrossRef）/ arXiv / S2 标题匹配 / OpenAlex 检索确认
+- **导入即解析**：任何论文入库后自动后台解析引用关系，不打断当前操作；阅读器与 3D 节点侧栏同步显示抓取进度
+- **抓取引用（参考文献）**：优先 Semantic Scholar 结构化参考文献（分页拉取，最准最全）；未收录时回退解析 PDF 参考文献段落（支持 `[1]` / `1.` / `[Vaswani+17]` / 无编号列表、机构作者、跨行断词与附录截断，自动去重），逐条经 DOI（CrossRef）/ arXiv / S2 标题匹配 / OpenAlex 检索确认
 - **抓取被引**：Semantic Scholar（限流退避），失败自动回退 OpenAlex 分页处理
-- **未入库引用闭环**：识别成功但不在库内的条目持久保存在「引用」面板，支持**单篇下载入库或一键全部下载**（arXiv / OpenAlex 开放获取），入库自动建边并出现在图谱中，后台下载不影响阅读
+- **未入库引用闭环**：识别成功但不在库内的条目持久保存在「引用」面板，支持**单篇下载入库或一键自适应并行全部下载**（arXiv / OpenAlex 开放获取），入库自动建边并出现在图谱中，后台下载不影响阅读
 - 🧩 离线模糊匹配（无需网络）与 ➕ 手动关联兜底
 
 ### 🧭 相似与库外发现
@@ -150,12 +150,14 @@ PaperWeave 提供两种 Agent 接入方式（详见 [`agents/AGENTS.md`](agents/
 
 ## 🧪 测试与质量
 
-三套全量回归，覆盖真实用户操作路径、接口契约与 MCP 协议：
+三套全量回归覆盖真实用户操作路径、接口契约与 MCP 协议，另有下载调度与 PDF 引用提取专项回归：
 
 ```bash
-npm run selftest     # 端到端自测：161 项用户场景（Electron 真实渲染 + 截图存档）
-npm run apitest      # Agent HTTP API 自测：47 项接口场景
+npm run selftest     # 端到端自测：189 项用户场景（Electron 真实渲染 + 截图存档）
+npm run apitest      # Agent HTTP API 自测：48 项接口场景
 npm run mcptest      # MCP Server 自测：49 项 stdio 场景
+npm run downloadtest # 自适应并发、退避、批量下载、去重与聚合进度
+npm run citationtest # 引用索引、真实 PDF 与无编号参考文献提取
 ```
 
 - 自测覆盖：导入去重、元数据提取、懒渲染、高亮防重叠、笔记、评星分区排序、跳数分色、多选最短路径、目录侧边栏、阅读位置记忆、引用抓取与下载闭环等

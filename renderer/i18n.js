@@ -120,6 +120,12 @@ const DICT = {
   '移除这条引用关联': 'Remove this citation link',
   '未能在线识别': 'unresolved',
   '抓取中': 'Fetching',
+  '{n} 进行中': '{n} active',
+  '{n} 等待中': '{n} queued',
+  '并发 {n}': 'Concurrency {n}',
+  '{n} 失败': '{n} failed',
+  '正在定位论文并准备抓取…': 'Locating paper and preparing fetch…',
+  '准备并行下载 {n} 个链接…': 'Preparing {n} parallel downloads…',
 
   /* ---------- 图谱 ---------- */
   '← 返回论文库': '← Back to library',
@@ -350,6 +356,18 @@ const DICT = {
   '复制失败，请手动选择复制': 'Copy failed; please select and copy manually',
   '未找到插件目录，请从项目仓库获取 extension 文件夹': 'Add-on folder not found; get the extension folder from the project repository',
   '（Agent API 未启动）': '(Agent API not running)',
+
+  /* ---------- 正文引用浮窗 ---------- */
+  '已在库中': 'In library',
+  '未入库': 'Not in library',
+  '尚未识别': 'Unresolved',
+  '（未知标题）': '(Untitled)',
+  '打开论文': 'Open paper',
+  '暂无摘要': 'No abstract available',
+  '下载入库': 'Download to library',
+  '⏳ 下载中…': '⏳ Downloading…',
+  '下载失败，请重试': 'Download failed; please retry',
+  '尚未识别，暂不可下载': 'Unresolved; download unavailable',
 };
 
 export function t(zh) {

@@ -61,6 +61,7 @@ export async function runSelftest(ctx) {
     await sleep(600);
     const viewer = window.__pg.viewer;
     check('PDF 阅读器打开', viewer && viewer.pages.length === 3);
+    check('打开论文时加载正文引用索引', viewer && viewer.citationEntries.length > 0, 'entries=' + (viewer ? viewer.citationEntries.length : 0));
     await sleep(1200);
     check('首屏页面即时渲染', viewer && viewer.pages[0].rendered && viewer.pages[0].viewport);
     // 滚动到底部触发懒渲染
@@ -319,6 +320,119 @@ export async function runSelftest(ctx) {
     viewer.annotations.splice(viewer.annotations.indexOf(columnOverlapAnn), 1);
     viewer._renderAnnotationsFor(columnPage);
 
+    // ---------- 5.7 正文引用标记：跨文本片段、范围展开、作者年份与无效编号 ----------
+    const hoverFixtures = [
+      { id: 'ref_1', order: 1, number: 1, surname: 'vaswani', year: '2017', title: attention.title, kind: 'library', paper: attention, external: null, raw: 'Attention reference' },
+      { id: 'ref_2', order: 2, number: 2, surname: 'kingma', year: '2015', title: 'Adam: A Method for Stochastic Optimization', kind: 'external', paper: null, external: (await bridge.getPaper(attention.id)).externalRefs[0], raw: 'Adam reference' },
+      { id: 'ref_3', order: 3, number: 3, surname: 'unknown', year: '2020', title: 'Unresolved reference', kind: 'raw', paper: null, external: null, raw: 'Unresolved reference raw text' },
+    ];
+    check('引用标记定位接口已注册', typeof viewer.setCitationIndex === 'function');
+    if (typeof viewer.setCitationIndex === 'function') {
+      const markerSpans = [];
+      const makeMarkerSpan = (text, left, top) => {
+        const s = document.createElement('span');
+        s.textContent = text;
+        s.style.cssText = `left:${left}px;top:${top}px;font:12px Arial;transform:none;`;
+        columnTextLayer.appendChild(s);
+        markerSpans.push(s);
+        return s;
+      };
+      makeMarkerSpan('See [', 60, 550);
+      const numericSpan = makeMarkerSpan('1–2]', 92, 550);
+      const authorSpan = makeMarkerSpan('Vaswani et al. (2017)', 60, 575);
+      const invalidSpan = makeMarkerSpan('[99]', 60, 600);
+      viewer.setCitationIndex(hoverFixtures);
+      viewer._buildCitationMarkers(columnPage);
+      const numericMarker = columnPage.citationMarkers.find(m => m.entryIds.includes('ref_1') && m.entryIds.includes('ref_2'));
+      check('跨片段数字范围引用展开', !!numericMarker, columnPage.citationMarkers.map(m => m.entryIds.join(',')).join('|'));
+      check('作者年份引用匹配', columnPage.citationMarkers.some(m => m.entryIds.includes('ref_1') && m !== numericMarker));
+      check('无效编号不生成引用标记', !columnPage.citationMarkers.some(m => m.entryIds.includes('ref_99')));
+      const nr = numericSpan.getBoundingClientRect();
+      const hit = viewer._citationAtPoint(nr.left + 2, nr.top + nr.height / 2);
+      check('鼠标位置返回对应引用条目', hit && hit.entries.length === 2, hit ? hit.entries.map(e => e.id).join(',') : 'null');
+      const ar = authorSpan.getBoundingClientRect();
+      const authorHit = viewer._citationAtPoint(ar.left + ar.width / 2, ar.top + ar.height / 2);
+      check('作者年份悬浮精确返回库内论文', authorHit && authorHit.entries.length === 1 && authorHit.entries[0].id === 'ref_1', authorHit ? authorHit.entries.map(e => e.id).join(',') : 'null');
+      markerSpans.forEach(s => s.remove());
+      viewer.setCitationIndex([]);
+    }
+
+    // ---------- 5.8 引用浮窗：三类卡片、摘要展开、移入保持与 Esc ----------
+    let CitationPopupClass = null;
+    try { ({ CitationPopup: CitationPopupClass } = await import('./citation-popup.js')); } catch (_) {}
+    check('引用浮窗组件可加载', !!CitationPopupClass);
+    if (CitationPopupClass) {
+      const popupRoot = document.createElement('div');
+      document.body.appendChild(popupRoot);
+      const popup = new CitationPopupClass({
+        root: popupRoot,
+        onOpenPaper: () => {},
+        onDownload: async () => null,
+      });
+      popup.show(hoverFixtures, { clientX: 500, clientY: 300 });
+      check('浮窗显示库内未入库和原始条目卡片',
+        popupRoot.querySelectorAll('.citation-card.library').length === 1 &&
+        popupRoot.querySelectorAll('.citation-card.external').length === 1 &&
+        popupRoot.querySelectorAll('.citation-card.raw').length === 1);
+      const abstractDetails = popupRoot.querySelector('details.citation-abstract');
+      abstractDetails.querySelector('summary').click();
+      check('库内论文摘要可展开', abstractDetails.open === true);
+      popupRoot.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false }));
+      popup.scheduleHide();
+      await sleep(220);
+      check('鼠标移入浮窗后保持显示', !popupRoot.classList.contains('hidden'));
+      await bridge.selftestShot('03-citation-popup');
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      check('Esc 关闭引用浮窗', popupRoot.classList.contains('hidden'));
+      popup.destroy();
+      popupRoot.remove();
+
+      // 下载失败允许重试，第二次成功后同一卡片升级为库内状态。
+      const statefulRoot = document.createElement('div');
+      document.body.appendChild(statefulRoot);
+      let attempts = 0;
+      const statefulPopup = new CitationPopupClass({
+        root: statefulRoot,
+        onOpenPaper: () => {},
+        onDownload: async () => (++attempts === 1 ? null : attention),
+      });
+      statefulPopup.show([hoverFixtures[1]], { clientX: 500, clientY: 300 });
+      statefulRoot.querySelector('.citation-download').click();
+      await sleep(20);
+      check('浮窗下载失败显示错误并允许重试',
+        !!statefulRoot.querySelector('.citation-error') && !statefulRoot.querySelector('.citation-download').disabled);
+      statefulRoot.querySelector('.citation-download').click();
+      await sleep(20);
+      check('浮窗下载成功原地升级为库内卡片', !!statefulRoot.querySelector('.citation-card.library'));
+      statefulPopup.destroy();
+      statefulRoot.remove();
+    }
+
+    // 真实 app 下载链路使用 mock 网络结果，验证 downloadOneRef 返回值与索引刷新。
+    const appPopup = window.__pg.citationPopup;
+    if (appPopup) {
+      const originalDownload = bridge.downloadRef;
+      const originalSetIndex = viewer.setCitationIndex.bind(viewer);
+      const originalExternals = (await bridge.getPaper(attention.id)).externalRefs;
+      let indexRefreshes = 0;
+      viewer.setCitationIndex = (entries) => { indexRefreshes++; return originalSetIndex(entries); };
+      bridge.downloadRef = async (paperId, key) => {
+        const current = await bridge.getPaper(paperId);
+        await bridge.updatePaper(paperId, { externalRefs: current.externalRefs.filter(e => e.key !== key) });
+        return { ok: true, paper: attention, duplicate: true };
+      };
+      appPopup.show([hoverFixtures[1]], { clientX: 500, clientY: 300 });
+      appPopup.root.querySelector('.citation-download').click();
+      await sleep(700);
+      check('真实下载链路返回论文并更新浮窗', !!appPopup.root.querySelector('.citation-card.library'));
+      check('下载完成后正文引用索引已刷新', indexRefreshes >= 1, 'refreshes=' + indexRefreshes);
+      bridge.downloadRef = originalDownload;
+      viewer.setCitationIndex = originalSetIndex;
+      await bridge.updatePaper(attention.id, { externalRefs: originalExternals });
+      await refreshData();
+      appPopup.hide();
+    }
+
     // ---------- 6. 便利贴 ----------
     viewer.annotations.push({
       id: 'a_test_sticky', type: 'sticky', page: 2, x: 0.3, y: 0.4,
@@ -371,6 +485,21 @@ export async function runSelftest(ctx) {
     // 模拟真实点击选择后的回调（onSelect 驱动滑条显隐）
     graph.opts.onSelect(attention.id, graph.selectedIds);
     check('选中后跳数滑条显示', !document.querySelector('#graphHopCtl').classList.contains('hidden'));
+
+    // 图谱内显示当前节点的并行抓取／下载进度，切换节点时严格隔离。
+    check('图谱侧栏包含引用进度区', !!document.querySelector('#graphSideProgress'));
+    if (window.__pg.receiveRefsProgress) {
+      window.__pg.receiveRefsProgress({ paperId: attention.id, stage: 'download', current: 2, total: 5, active: 2, pending: 3, concurrency: 3, currentItem: 'Parallel reference', note: '下载中…' });
+      const gp = document.querySelector('#graphSideProgress');
+      check('图谱显示并行进度与并发数', gp && !gp.classList.contains('hidden') && gp.textContent.includes('2 / 5') && gp.textContent.includes('并发 3'), gp && gp.textContent);
+      graph.opts.onSelect(bert.id, [bert.id]);
+      check('切换节点不显示上一论文进度', gp && gp.classList.contains('hidden'), gp && gp.textContent);
+      window.__pg.receiveRefsProgress({ paperId: bert.id, stage: 'references', current: 1, total: 4, currentItem: 'BERT reference', note: '解析中' });
+      check('新节点显示自己的抓取进度', gp && !gp.classList.contains('hidden') && gp.textContent.includes('1 / 4') && gp.textContent.includes('BERT reference'), gp && gp.textContent);
+    } else {
+      check('图谱进度事件入口已暴露', false);
+    }
+    graph.opts.onSelect(attention.id, [attention.id]);
     await bridge.selftestShot('05-graph-selected');
 
     // ---------- 9.1 流光方向 + 详情栏引用列表 + BibTeX ----------
@@ -801,6 +930,20 @@ export async function runSelftest(ctx) {
     await sleep(150);
     check('统一导入弹窗打开', !document.querySelector('#importModal').classList.contains('hidden'));
     check('弹窗含拖放区与链接输入', !!document.querySelector('#importDrop') && !!document.querySelector('#urlInput'));
+    const originalImportUrls = bridge.importUrls;
+    let importBatchCalls = 0;
+    bridge.importUrls = async (urls, operationId) => {
+      importBatchCalls++;
+      window.__pg.handleImportProgress({ operationId, key: urls[0], currentItem: urls[0], status: 'start', current: 0, total: 2, active: 2, pending: 0, concurrency: 2, note: '下载中…' });
+      window.__pg.handleImportProgress({ operationId, key: urls[1], currentItem: urls[1], status: 'success', current: 2, total: 2, active: 0, pending: 0, concurrency: 2, note: '完成 ✓' });
+      return { ok: true, results: urls.map(() => ({ paper: attention, duplicate: true })) };
+    };
+    document.querySelector('#urlInput').value = 'https://example.test/a.pdf\nhttps://example.test/b.pdf';
+    document.querySelector('#importGo').click();
+    await sleep(600);
+    check('多链接通过一次批量接口并行导入', importBatchCalls === 1, 'calls=' + importBatchCalls);
+    check('导入弹窗显示批次并发与完成数', document.querySelector('#urlProgress').textContent.includes('2 / 2') && document.querySelector('#urlProgress').textContent.includes('并发 2'), document.querySelector('#urlProgress').textContent);
+    bridge.importUrls = originalImportUrls;
     document.querySelector('#importCancel').click();
     check('导入弹窗关闭', document.querySelector('#importModal').classList.contains('hidden'));
 

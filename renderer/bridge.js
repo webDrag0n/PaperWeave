@@ -1,12 +1,15 @@
 // PaperWeave 桥接层：Electron 下走 IPC，浏览器预览下走 localStorage + IndexedDB
 // 0.8.0 多论文库：全局论文注册表 + 每库 paperIds/links，内容 hash / DOI / 标题冲突检测
 import { extractPdfInfoWeb } from './pdfmeta.js';
+import { AdaptiveScheduler } from '../shared/adaptive-scheduler.mjs';
 
 function uid(p = 'p_') { return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
 /* ---------------- Web 模式存储 ---------------- */
 const LS_KEY = 'paperweave_data_v1';
 let webProgressCb = null;
+let webImportProgressCb = null;
+const webDownloadScheduler = new AdaptiveScheduler();
 function loadData() {
   try {
     const raw = JSON.parse(localStorage.getItem(LS_KEY));
@@ -87,7 +90,7 @@ async function sha1Hex(buf) {
 const pendingImports = new Map();
 
 async function webImportBuffer(buf, nameHint, opts = {}) {
-  const data = loadData();
+  let data = loadData();
   const hash = await sha1Hex(buf);
   const fileName = hash.slice(0, 16) + '.pdf';
   // hash 命中全局注册表 → 复用
@@ -102,6 +105,14 @@ async function webImportBuffer(buf, nameHint, opts = {}) {
   await idb.put(fileName, buf);
   let info = {};
   try { info = await extractPdfInfoWeb(buf.slice(0)); } catch (e) { console.warn('extract failed', e); }
+  data = loadData();
+  const concurrentHash = data.papers.find(p => p.file === fileName);
+  if (concurrentHash) {
+    const lib = curLib(data);
+    const inCurrent = lib.paperIds.includes(concurrentHash.id);
+    if (!inCurrent) { lib.paperIds.push(concurrentHash.id); saveData(data); }
+    return { paper: pub(concurrentHash), duplicate: inCurrent, reused: !inCurrent };
+  }
   const titleGuess = info.title || (nameHint || '未命名论文').replace(/\.pdf$/i, '');
   // 冲突检测：DOI 相同但内容不同 / 标题高度相似
   const conflicts = [];
@@ -150,6 +161,13 @@ async function webImportBuffer(buf, nameHint, opts = {}) {
     updatedAt: Date.now(),
   };
   const d2 = loadData();
+  const finalHash = d2.papers.find(p => p.file === fileName);
+  if (finalHash) {
+    const lib = curLib(d2);
+    const inCurrent = lib.paperIds.includes(finalHash.id);
+    if (!inCurrent) { lib.paperIds.push(finalHash.id); saveData(d2); }
+    return { paper: pub(finalHash), duplicate: inCurrent, reused: !inCurrent };
+  }
   d2.papers.push(paper);
   curLib(d2).paperIds.push(paper.id);
   saveData(d2);
@@ -230,20 +248,38 @@ const webBridge = {
     }
     return { canceled: false, results };
   },
-  async importUrl(url) {
+  async importUrl(url, opts = {}) {
     try {
       let u = url.trim();
       const m = u.match(/^https?:\/\/arxiv\.org\/abs\/([^/?#]+)/i);
       if (m) u = 'https://arxiv.org/pdf/' + m[1];
       const res = await fetch(u);
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) {
+        const err = new Error('HTTP ' + res.status);
+        err.status = res.status;
+        const retryAfter = Number(res.headers.get('retry-after'));
+        if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfter = retryAfter;
+        throw err;
+      }
       const buf = await res.arrayBuffer();
       const head = new Uint8Array(buf.slice(0, 5));
       if (new TextDecoder('latin1').decode(head) !== '%PDF-') throw new Error('链接内容不是 PDF');
       return { ok: true, ...(await webImportBuffer(buf, u.split('/').pop() || 'download.pdf')) };
     } catch (e) {
+      if (opts.throwOnError) throw e;
       return { ok: false, error: '下载失败：' + e.message + '（浏览器模式受跨域限制，桌面版无此限制）' };
     }
+  },
+  async importUrls(urls, operationId) {
+    const input = Array.isArray(urls) ? urls : [];
+    const tasks = input.map(url => ({
+      key: url.trim(), url: url.trim(), label: url,
+      run: () => this.importUrl(url, { throwOnError: true }),
+    }));
+    const outcomes = await webDownloadScheduler.run(tasks, {
+      onProgress: p => webImportProgressCb && webImportProgressCb({ operationId, stage: 'import', ...p }),
+    });
+    return { results: outcomes.map((r, i) => r.ok ? r.value : { ok: false, error: r.error.message, url: input[i] }) };
   },
   async resolveImport(token, action) {
     const pend = pendingImports.get(token);
@@ -313,6 +349,7 @@ const webBridge = {
     return d.annotations[paperId];
   },
   async listLinks() { return curLib(loadData()).links; },
+  onImportProgress(cb) { webImportProgressCb = cb; return () => { webImportProgressCb = null; }; },
   onRefsProgress(cb) { webProgressCb = cb; return () => { webProgressCb = null; }; },
   async addLink(from, to, source) {
     const d = loadData();
@@ -333,6 +370,13 @@ const webBridge = {
     lib.links.splice(i, 1);
     saveData(d);
     return true;
+  },
+  async citationIndex(paperId) {
+    const d = loadData();
+    const paper = d.papers.find(p => p.id === paperId);
+    if (!paper) return [];
+    const { buildCitationIndexWeb } = await import('./citation-index.js');
+    return buildCitationIndexWeb(paper, libPapers(d));
   },
   async fetchRefs(paperId) {
     const references = await this.fetchReferences(paperId);
@@ -458,19 +502,30 @@ const webBridge = {
     const paper = d.papers.find(p => p.id === paperId);
     if (!paper) return { ok: false, error: '论文不存在' };
     const want = (paper.externalRefs || []).filter(r => dir === 'both' || !dir || r.dir === dir);
+    if (!want.length) return { ok: true, total: 0, downloaded: 0, skipped: 0, failed: [] };
+    const tasks = want.map(ref => ({
+      key: paperId + ':' + ref.key,
+      url: ref.arxivId ? 'https://arxiv.org/pdf/' + ref.arxivId : (ref.doi || ref.title),
+      label: ref.title.slice(0, 60),
+      run: async () => {
+        const result = await this.downloadRef(paperId, ref.key);
+        if (!result.ok) throw new Error(result.error || '下载失败');
+        return { ref, result };
+      },
+    }));
+    const outcomes = await webDownloadScheduler.run(tasks, {
+      onProgress: p => webProgressCb && webProgressCb({ paperId, stage: 'download', ...p }),
+    });
     let downloaded = 0, skipped = 0;
     const failed = [];
-    for (let i = 0; i < want.length; i++) {
-      webProgressCb && webProgressCb({ paperId, stage: 'download', current: i, total: want.length, currentItem: want[i].title.slice(0, 60), note: '下载中…' });
-      try {
-        const r = await this.downloadRef(paperId, want[i].key);
-        if (r.ok) { if (r.duplicate) skipped++; else downloaded++; }
-        else failed.push({ title: want[i].title.slice(0, 80), error: r.error });
-      } catch (e) {
-        failed.push({ title: want[i].title.slice(0, 80), error: e.message });
+    outcomes.forEach((r, i) => {
+      if (r.ok) {
+        if (r.value.result.duplicate) skipped++;
+        else downloaded++;
+      } else {
+        failed.push({ title: want[i].title.slice(0, 80), error: r.error.message });
       }
-      webProgressCb && webProgressCb({ paperId, stage: 'download', current: i + 1, total: want.length, currentItem: want[i].title.slice(0, 60), note: '' });
-    }
+    });
     return { ok: true, total: want.length, downloaded, skipped, failed };
   },
   async autoMatchRefs(paperId) {

@@ -113,18 +113,59 @@ export async function extractPdfInfoWeb(buffer) {
   const yM = headText.match(/\b(19|20)\d{2}\b/);
   if (yM) out.year = yM[0];
 
-  const refStart = Math.max(1, doc.numPages - 6);
-  let full = '';
-  for (let i = refStart; i <= doc.numPages; i++) {
-    try {
-      const page = await doc.getPage(i);
-      const tc = await page.getTextContent();
-      full += itemsToLines(tc.items).join('\n') + '\n';
-    } catch (_) {}
-  }
-  const refM = full.match(/(?:^|\n)\s*(references|bibliography)\s*\n([\s\S]+)$/i);
-  if (refM) out.refText = refM[2].slice(0, 40000);
+  out.refText = await extractRefTextWeb(doc);
 
   try { doc.destroy(); } catch (_) {}
   return out;
+}
+
+function findReferencesBodyWeb(full) {
+  const lines = String(full || '').split('\n').filter(line => {
+    const t = line.trim();
+    return !/^Published as a conference paper at\b/i.test(t) && !/^\d{1,4}$/.test(t);
+  });
+  let idx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (/^(references|bibliography)\b/i.test(l) && l.length <= 30 && !/\[\d+\]/.test(l)) idx = i;
+  }
+  if (idx < 0) return null;
+  const body = lines.slice(idx + 1);
+  let entryStarts = 0;
+  let cut = -1;
+  for (let i = 0; i < body.length; i++) {
+    const t = body[i].trim();
+    if (/^\s*(\[\d+\]|\d{1,3}[.)])\s+/.test(t)) entryStarts++;
+    const appendix = /^(appendix|supplementary material|checklist)\b/i.test(t)
+      || /^[A-Z](?:\.?\s+)+[A-Z][A-Z\s-]{3,}$/.test(t);
+    const meaningful = entryStarts >= 1 || body.slice(0, i).join('\n').length > 200;
+    if (meaningful && t.length < 100 && appendix) { cut = i; break; }
+  }
+  const text = (cut >= 0 ? body.slice(0, cut) : body).join('\n').trim();
+  const hasYear = /\b(?:19|20)\d{2}[a-z]?\b/.test(text);
+  return (entryStarts >= 1 || hasYear) && text.length > 40 ? text.slice(0, 40000) : null;
+}
+
+async function extractRefTextWeb(doc) {
+  const pages = new Map();
+  for (const w of [6, 12, 24, Number.MAX_SAFE_INTEGER]) {
+    const start = Math.max(1, doc.numPages - w + 1);
+    for (let i = start; i <= doc.numPages; i++) {
+      if (pages.has(i)) continue;
+      let text = '';
+      try {
+        const page = await doc.getPage(i);
+        const tc = await page.getTextContent();
+        text = itemsToLines(tc.items).join('\n');
+      } catch (_) {}
+      pages.set(i, text);
+      if (pages.size % 4 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    const full = [];
+    for (let i = start; i <= doc.numPages; i++) full.push(pages.get(i) || '');
+    const body = findReferencesBodyWeb(full.join('\n'));
+    if (body) return body;
+    if (start === 1) break;
+  }
+  return '';
 }

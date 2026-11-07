@@ -167,9 +167,12 @@ async function extractPdfInfo(buffer) {
   return out;
 }
 
-// 从已拼接的行文本中定位 References 正文：取最后一个短标题行，跳过目录行
+// 从已拼接的行文本中定位 References 正文：取最后一个短标题行，跳过目录行与页眉页脚
 function findReferencesBody(full) {
-  const lines = full.split('\n');
+  const lines = String(full || '').split('\n').filter(line => {
+    const t = line.trim();
+    return !/^Published as a conference paper at\b/i.test(t) && !/^\d{1,4}$/.test(t);
+  });
   let idx = -1;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i].trim();
@@ -178,39 +181,44 @@ function findReferencesBody(full) {
   }
   if (idx < 0) return null;
   const body = lines.slice(idx + 1);
-  // 参考文献之后的附录正文会被无编号行粘到最后一条上；出现附录类短标题且已有足够条目时截断
+  // 编号与无编号参考文献都可能后接附录；ICLR 常用“A THE ...”一级标题。
   let entryStarts = 0;
-  const cut = body.findIndex(l => {
-    if (/^\s*(\[\d+\]|\d{1,2}[.)])\s+/.test(l)) entryStarts++;
-    const t = l.trim();
-    return entryStarts >= 5 && t.length < 40 && /^(appendix|supplementary material|checklist|a\.?\s+appendix)\b/i.test(t);
-  });
-  const text = (cut >= 0 ? body.slice(0, cut) : body).join('\n');
-  // 接受门槛：至少 1 个条目起始且正文不太短（样例/短文参考文献可能不足 200 字符）
-  return entryStarts >= 1 && text.length > 40 ? text.slice(0, 40000) : null;
+  let cut = -1;
+  for (let i = 0; i < body.length; i++) {
+    const t = body[i].trim();
+    if (/^\s*(\[\d+\]|\d{1,3}[.)])\s+/.test(t)) entryStarts++;
+    const appendix = /^(appendix|supplementary material|checklist)\b/i.test(t)
+      || /^[A-Z](?:\.?\s+)+[A-Z][A-Z\s-]{3,}$/.test(t);
+    const meaningful = entryStarts >= 1 || body.slice(0, i).join('\n').length > 200;
+    if (meaningful && t.length < 100 && appendix) { cut = i; break; }
+  }
+  const text = (cut >= 0 ? body.slice(0, cut) : body).join('\n').trim();
+  // 无编号作者—年份列表没有条目起始标记，用年份与文本长度共同判断。
+  const hasYear = /\b(?:19|20)\d{2}[a-z]?\b/.test(text);
+  return (entryStarts >= 1 || hasYear) && text.length > 40 ? text.slice(0, 40000) : null;
 }
 
 async function extractRefText(doc, itemsToLines) {
-  // 窗口逐步扩大：6 → 12 → 24 → 全文；每扩一次尝试匹配，命中即返回
+  // 页文本只提取一次；扩窗后按真实页码升序重建，避免页块按读取顺序倒拼。
   const windows = [6, 12, 24, Number.MAX_SAFE_INTEGER];
-  let nextFrom = doc.numPages + 1;
-  let full = '';
+  const pages = new Map();
   let pageCount = 0;
   for (const w of windows) {
     const start = Math.max(1, doc.numPages - w + 1);
-    if (start < nextFrom) {
-      for (let i = start; i < nextFrom; i++) {
-        try {
-          const page = await doc.getPage(i);
-          const tc = await page.getTextContent();
-          full += itemsToLines(tc.items).join('\n') + '\n';
-        } catch (_) {}
-        // 每 4 页让出一次事件循环，避免长文档提取阻塞主进程
-        if (++pageCount % 4 === 0) await new Promise(r => setImmediate(r));
-      }
-      nextFrom = start;
+    for (let i = start; i <= doc.numPages; i++) {
+      if (pages.has(i)) continue;
+      let text = '';
+      try {
+        const page = await doc.getPage(i);
+        const tc = await page.getTextContent();
+        text = itemsToLines(tc.items).join('\n');
+      } catch (_) {}
+      pages.set(i, text);
+      if (++pageCount % 4 === 0) await new Promise(r => setImmediate(r));
     }
-    const body = findReferencesBody(full);
+    const full = [];
+    for (let i = start; i <= doc.numPages; i++) full.push(pages.get(i) || '');
+    const body = findReferencesBody(full.join('\n'));
     if (body) return body;
     if (start === 1) break;
   }
@@ -237,4 +245,4 @@ function bufferIntoLibrary(libraryDir, buf, nameHint) {
   return { fileName, hash };
 }
 
-module.exports = { extractPdfInfo, copyIntoLibrary, bufferIntoLibrary, sha1, loadPdfjs };
+module.exports = { extractPdfInfo, extractRefText, findReferencesBody, copyIntoLibrary, bufferIntoLibrary, sha1, loadPdfjs };

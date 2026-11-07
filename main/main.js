@@ -7,6 +7,7 @@ const { pathToFileURL } = require('url');
 const { Store } = require('./store');
 const { createService } = require('./service');
 const { startAgentApi, writeConnectionInfo } = require('./agent-api');
+const { buildCitationIndex } = require('./citation-index');
 
 // ES Module 需要通过标准 scheme 加载（file:// 下 module/CORS 受限）
 protocol.registerSchemesAsPrivileged([
@@ -165,6 +166,16 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
+  ipcMain.handle('papers:importUrls', async (e, urls, operationId) => {
+    const onProgress = (p) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('import:progress', { operationId, ...p });
+    };
+    try {
+      return { ok: true, ...(await service.importFromUrls(urls, {}, onProgress)) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 
   ipcMain.handle('ann:list', (e, paperId) => store.getAnnotations(paperId));
   ipcMain.handle('ann:save', (e, paperId, anns) => store.setAnnotations(paperId, anns));
@@ -188,6 +199,10 @@ function registerIpc() {
   ipcMain.handle('refs:fetchReferences', (e, paperId) => service.fetchReferences(paperId, progressEmitter(paperId)));
   ipcMain.handle('refs:fetchCitations', (e, paperId) => service.fetchCitations(paperId, progressEmitter(paperId)));
   ipcMain.handle('refs:autoMatch', (e, paperId) => service.autoMatch(paperId));
+  ipcMain.handle('refs:citationIndex', (e, paperId) => {
+    const paper = store.getPaper(paperId);
+    return paper ? buildCitationIndex(paper, store.data.papers) : [];
+  });
   ipcMain.handle('refs:downloadRef', async (e, paperId, key) => {
     try { return await service.downloadRef(paperId, key, progressEmitter(paperId)); }
     catch (err) { return { ok: false, error: err.message }; }

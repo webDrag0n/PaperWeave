@@ -18,7 +18,7 @@ const REF_START_RE_WEB = /^\s*(\[\d{1,3}\]|\d{1,3}[.)]\s|\[[A-Za-z][A-Za-z0-9+&.
 
 export function splitReferenceEntriesWeb(refText) {
   if (!refText) return [];
-  const lines = refText.split('\n');
+  const lines = String(refText).split('\n');
   const marked = [];
   let cur = '', sawMarker = false;
   for (const line of lines) {
@@ -27,29 +27,38 @@ export function splitReferenceEntriesWeb(refText) {
       if (cur.trim()) marked.push(cur.trim());
       cur = line.replace(REF_START_RE_WEB, '');
     } else if (sawMarker) {
-      cur += ' ' + line.trim();
+      cur += '\n' + line.trim();
     } else {
-      cur += (cur ? ' ' : '') + line.trim();
+      cur += (cur ? '\n' : '') + line.trim();
     }
   }
   if (cur.trim()) marked.push(cur.trim());
   let entries = marked.filter(e => e.length > 15);
   if (entries.length <= 1) {
-    const newEntryRe = /^\s*[A-Z][A-Za-zÀ-ÿ'\-]{1,30}(,\s*[A-Z]\.|\s+[A-Z]\.)/;
+    const newEntryRe = /^\s*[A-Z][A-Za-zÀ-ÿ'&.\-]*(?:\s+(?:[A-Z][A-Za-zÀ-ÿ'&.\-]*|and|et al\.?)){0,10}(?:,|\.)/;
+    const completeEntry = (text) => {
+      const t = text.trim();
+      return /\b(?:19|20)\d{2}[a-z]?\s*[.,)]\s*$/i.test(t) || /https?:\/\/[\s\S]+[.)\]]\s*$/i.test(t);
+    };
     const rebuilt = [];
     cur = '';
     for (const line of lines) {
       const t = line.trim();
-      if (t && newEntryRe.test(t) && cur.trim().length > 25) {
+      if (!t) continue;
+      if (newEntryRe.test(t) && cur.trim().length > 25 && completeEntry(cur)) {
         rebuilt.push(cur.trim());
         cur = t;
       } else {
-        cur += (cur ? ' ' : '') + t;
+        cur += (cur ? '\n' : '') + t;
       }
     }
     if (cur.trim()) rebuilt.push(cur.trim());
     if (rebuilt.length > entries.length) entries = rebuilt.filter(e => e.length > 15);
   }
+  entries = entries.map(entry => entry
+    .replace(/([A-Za-z]+)-\s*\n\s*([a-z]+)/g, (_, a, b) => /^(long|multi|self|real|cross|open|single|double|pre|post|non)$/i.test(a) ? a + '-' + b : a + b)
+    .replace(/\s*\n\s*/g, ' ')
+    .trim());
   const seen = new Set();
   const out = [];
   for (const e of entries) {

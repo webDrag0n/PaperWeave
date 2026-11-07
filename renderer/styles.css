@@ -654,6 +654,28 @@ button { font-family: inherit; }
 :root[data-theme="light"] #graphSide .btn-primary { color: #fff; }
 
 /* ---------- 弹出组件 ---------- */
+.citation-popup {
+  position: fixed; z-index: 230; width: 360px; max-width: calc(100vw - 20px);
+  max-height: 60vh; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 13px;
+  box-shadow: var(--shadow-pop); padding: 7px; color: var(--text);
+}
+.citation-card { padding: 10px 11px; border-radius: 9px; }
+.citation-card + .citation-card { border-top: 1px solid var(--line); }
+.citation-card.library { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.citation-status { float: right; margin-left: 8px; font-size: 10px; color: var(--accent); }
+.citation-card.external .citation-status { color: var(--yellow); }
+.citation-card.raw .citation-status { color: var(--text-dim); }
+.citation-title { font-size: 13px; font-weight: 650; line-height: 1.45; margin-bottom: 5px; }
+.citation-meta { color: var(--text-dim); font-size: 11px; line-height: 1.55; }
+.citation-doi { color: var(--accent); font-size: 10.5px; margin-top: 4px; overflow-wrap: anywhere; }
+.citation-actions { display: flex; gap: 6px; margin-top: 9px; }
+.citation-abstract { margin-top: 9px; border-top: 1px solid var(--line); padding-top: 7px; }
+.citation-abstract summary { cursor: pointer; color: var(--accent); font-size: 11px; user-select: none; }
+.citation-abstract-body { margin-top: 7px; max-height: 180px; overflow-y: auto; white-space: pre-wrap; color: var(--text-dim); font-size: 11.5px; line-height: 1.65; }
+.citation-raw { margin-top: 7px; max-height: 100px; overflow-y: auto; color: var(--text-dim); font-size: 11px; line-height: 1.55; }
+.citation-note { margin-top: 7px; color: var(--text-dim); font-size: 11px; }
+.citation-error { margin-top: 7px; color: var(--danger); font-size: 11px; line-height: 1.5; }
 .sel-popup {
   position: fixed; z-index: 200; display: flex; align-items: center; gap: 6px;
   background: var(--bg3); border: 1px solid var(--line); border-radius: 22px;
@@ -775,8 +797,8 @@ button { font-family: inherit; }
   padding: 10px 12px; margin-bottom: 10px;
 }
 .rp-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 7px; }
-.rp-head #rpStage { color: var(--accent); font-weight: 600; }
-.rp-head #rpCount { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.rp-head [data-rp-stage] { color: var(--accent); font-weight: 600; }
+.rp-head [data-rp-count] { color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .rp-bar { height: 6px; border-radius: 3px; background: var(--bg2); overflow: hidden; }
 .rp-fill {
   height: 100%; width: 0%; border-radius: 3px;
