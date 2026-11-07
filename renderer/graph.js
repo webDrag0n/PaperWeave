@@ -3,6 +3,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { parseInlineMd, inlineMd as inlineMdHtml } from './markdown.js';
+import { computeTimelineLayout } from './graph-layout.js';
+import { t } from './i18n.js';
 
 const THEMES = {
   dark: {
@@ -138,6 +140,9 @@ export class GraphView {
   constructor(opts) {
     this.opts = opts;
     this.theme = THEMES[opts.theme] ? opts.theme : 'dark';
+    this.viewMode = opts.viewMode === 'timeline' ? 'timeline' : 'network';
+    this.timelineColumns = [];
+    this.activeTimelineKey = null;
     this.nodes = [];   // {id,paper,mesh,glow,label,pos,vel,degree}
     this.edges = [];   // {link,a,b,line,pulse,phase,pulseBase}
     this.selectedIds = [];  // 多选集合（有序，最后一个为主选中）
@@ -157,6 +162,7 @@ export class GraphView {
     for (const nd of this.nodes) {
       if (nd.label) { this.labelGroup.remove(nd.label); disposeObj(nd.label); nd.label = null; }
     }
+    if (this._built && this.viewMode === 'timeline') this._layoutTimeline();
     this._recolor();
     this.renderOnce();
   }
@@ -184,7 +190,8 @@ export class GraphView {
     this.edgeGroup = new THREE.Group();
     this.labelGroup = new THREE.Group();
     this.pathGroup = new THREE.Group(); // 多选最短关联的轮廓高亮
-    this.scene.add(this.edgeGroup, this.nodeGroup, this.labelGroup, this.pathGroup);
+    this.timelineGroup = new THREE.Group(); // 时间线年份刻度与参考线
+    this.scene.add(this.timelineGroup, this.edgeGroup, this.nodeGroup, this.labelGroup, this.pathGroup);
 
     const el = this.renderer.domElement;
     el.addEventListener('pointermove', (e) => this._onMove(e));
@@ -288,10 +295,110 @@ export class GraphView {
     if (this._built) this.renderer.render(this.scene, this.camera);
   }
 
+  setViewMode(mode) {
+    const next = mode === 'timeline' ? 'timeline' : 'network';
+    if (next === this.viewMode) return;
+    this.viewMode = next;
+    if (!this._built) return;
+    this._layout();
+    this._fitCamera(false);
+    this._recolor();
+  }
+
+  focusTimelineYear(key) {
+    if (this.viewMode !== 'timeline') return false;
+    const column = this.timelineColumns.find(c => c.key === key);
+    if (!column) return false;
+    this.activeTimelineKey = key;
+    const yearNodes = this.nodes.filter(n => Math.abs(n.pos.x - column.x) < 0.001);
+    const center = new THREE.Vector3(column.x, 0, 0);
+    if (yearNodes.length) {
+      center.y = yearNodes.reduce((sum, n) => sum + n.pos.y, 0) / yearNodes.length;
+    }
+    const minY = Math.min(...yearNodes.map(n => n.pos.y), center.y);
+    const maxY = Math.max(...yearNodes.map(n => n.pos.y), center.y);
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
+    const fitHeight = (maxY - minY + 36) / (2 * Math.tan(halfFov)) * 1.12;
+    const currentDist = this.camera.position.distanceTo(this.controls.target);
+    const dist = Math.max(55, Math.min(currentDist, fitHeight));
+    this._tweenCam(new THREE.Vector3(center.x, center.y + dist * 0.12, center.z + dist), center, 500);
+    return true;
+  }
+
+  stepTimelineYear(delta) {
+    if (!this.timelineColumns.length) return false;
+    const current = this.timelineColumns.findIndex(c => c.key === this.activeTimelineKey);
+    const next = current < 0 ? 0 : Math.max(0, Math.min(this.timelineColumns.length - 1, current + delta));
+    return this.focusTimelineYear(this.timelineColumns[next].key);
+  }
+
+  zoomView(factor) {
+    if (!this._built || !Number.isFinite(factor) || factor <= 0) return;
+    const target = this.controls.target.clone();
+    const offset = this.camera.position.clone().sub(target);
+    const distance = Math.max(20, Math.min(2000, offset.length() * factor));
+    offset.setLength(distance);
+    this._tweenCam(target.clone().add(offset), target, 260);
+  }
+
+  fitView() {
+    if (this._built) this._fitCamera(false);
+  }
+
+  _clearTimeline() {
+    this.timelineColumns = [];
+    if (!this.timelineGroup) return;
+    while (this.timelineGroup.children.length) {
+      const child = this.timelineGroup.children.pop();
+      disposeObj(child);
+      this.timelineGroup.remove(child);
+    }
+  }
+
+  _updateEdges() {
+    for (const edge of this.edges) {
+      edge.line.geometry.setFromPoints([edge.a.pos, edge.b.pos]);
+    }
+  }
+
+  _layoutTimeline() {
+    const layout = computeTimelineLayout(this.nodes.map(node => node.paper), { unknownLabel: t('未知年份') });
+    for (const node of this.nodes) {
+      const pos = layout.positions.get(node.id);
+      if (pos) node.pos.set(pos.x, pos.y, pos.z);
+      node.vel.set(0, 0, 0);
+    }
+    this._clearTimeline();
+    this.timelineColumns = layout.columns;
+    if (!layout.columns.some(c => c.key === this.activeTimelineKey)) {
+      this.activeTimelineKey = layout.columns.length ? layout.columns[0].key : null;
+    }
+    for (const column of layout.columns) {
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(column.x, layout.minY - 10, -2),
+          new THREE.Vector3(column.x, layout.yearLabelY - 4, -2),
+        ]),
+        new THREE.LineBasicMaterial({ color: this.T.edgeBase, transparent: true, opacity: 0.22 }),
+      );
+      const label = makeLabelSprite(column.label, this.T);
+      label.position.set(column.x, layout.yearLabelY, 0);
+      this.timelineGroup.add(line, label);
+    }
+    this._updateEdges();
+  }
+
   _layout() {
     const nodes = this.nodes;
     const edges = this.edges;
-    if (!nodes.length) return;
+    if (!nodes.length) { this._clearTimeline(); return; }
+    if (this.viewMode === 'timeline') { this._layoutTimeline(); return; }
+    this._clearTimeline();
+    // 从时间线切回时补回 Z 轴深度，避免力导向继续停留在二维平面。
+    if (nodes.every(nd => Math.abs(nd.pos.z) < 0.01)) {
+      const depth = Math.max(30, 14 * Math.cbrt(Math.max(8, nodes.length)));
+      for (const nd of nodes) nd.pos.z = (Math.random() - 0.5) * 2 * depth;
+    }
     const k = 26;               // 理想间距
     const iterations = Math.min(500, 120 + nodes.length * 8);
     const tmp = new THREE.Vector3();
@@ -329,10 +436,7 @@ export class GraphView {
         nd.vel.set(0, 0, 0);
       }
     }
-    // 更新线段位置
-    for (const e of edges) {
-      e.line.geometry.setFromPoints([e.a.pos, e.b.pos]);
-    }
+    this._updateEdges();
   }
 
   _fitCamera(instant) {
@@ -340,9 +444,15 @@ export class GraphView {
     const box = new THREE.Box3();
     for (const nd of this.nodes) box.expandByPoint(nd.pos);
     const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3()).length();
-    const dist = Math.max(70, size * 1.15);
-    const toPos = new THREE.Vector3(center.x, center.y + dist * 0.18, center.z + dist);
+    const size = box.getSize(new THREE.Vector3());
+    let dist = Math.max(70, size.length() * 1.15);
+    if (this.viewMode === 'timeline') {
+      const halfFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
+      const fitHeight = (size.y + 36) / (2 * Math.tan(halfFov));
+      const fitWidth = (size.x + 44) / (2 * Math.tan(halfFov) * Math.max(0.5, this.camera.aspect));
+      dist = Math.max(70, fitHeight, fitWidth) * 1.16;
+    }
+    const toPos = new THREE.Vector3(center.x, center.y + dist * 0.12, center.z + dist);
     if (instant) {
       this.camera.position.copy(toPos);
       this.controls.target.copy(center);
@@ -479,7 +589,7 @@ export class GraphView {
 
     // 边：两端都在 N 跳内的高亮，颜色取较深一端的跳色
     for (const e of this.edges) {
-      let color = T.edgeBase, opacity = 0.55;
+      let color = T.edgeBase, opacity = this.viewMode === 'timeline' ? 0.3 : 0.55;
       if (sel.length) {
         const ha = hop.get(e.a.id), hb = hop.get(e.b.id);
         if (ha !== undefined && hb !== undefined && Math.max(ha, hb) <= this.hopDepth) {

@@ -22,6 +22,7 @@ const state = {
   bulkSelected: new Set(),
   sort: localStorage.getItem('pg-sort') || 'rating',
   graphFrom: 'library',
+  graphViewMode: localStorage.getItem('pg-graph-view-mode') === 'timeline' ? 'timeline' : 'network',
   graphMinRating: localStorage.getItem('pg-graph-min-rating') || 'all',
   libraries: [],
   currentLibraryId: null,
@@ -479,6 +480,39 @@ function closeGraph() {
   }
 }
 
+function syncGraphModeButtons() {
+  $$('[data-graph-mode]').forEach(button => {
+    const active = button.dataset.graphMode === state.graphViewMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  syncTimelineControls();
+}
+
+function syncTimelineControls() {
+  const ctl = $('#graphTimelineCtl');
+  if (!ctl) return;
+  const columns = graph && state.graphViewMode === 'timeline' ? graph.timelineColumns : [];
+  ctl.classList.toggle('hidden', state.view !== 'graph' || !columns.length);
+  const select = $('#graphYearSelect');
+  const keys = columns.map(c => c.key);
+  if (select.dataset.keys !== keys.join('|')) {
+    select.innerHTML = '';
+    for (const column of columns) {
+      const option = document.createElement('option');
+      option.value = column.key;
+      option.textContent = column.label;
+      select.appendChild(option);
+    }
+    select.dataset.keys = keys.join('|');
+  }
+  const activeKey = graph && graph.activeTimelineKey;
+  const activeIndex = Math.max(0, keys.indexOf(activeKey));
+  if (columns.length) select.value = keys.includes(activeKey) ? activeKey : keys[0];
+  $('#graphPrevYear').disabled = !columns.length || activeIndex <= 0;
+  $('#graphNextYear').disabled = !columns.length || activeIndex >= columns.length - 1;
+}
+
 function showView(name) {
   state.view = name;
   $('#libraryView').classList.toggle('hidden', name !== 'library');
@@ -488,6 +522,7 @@ function showView(name) {
   if (name === 'graph') {
     $('#btnGraphBack').textContent = state.graphFrom === 'reader' ? '← 继续阅读' : '← 返回论文库';
     $('#graphMinRating').value = state.graphMinRating;
+    syncGraphModeButtons();
     ensureGraph();
     // 等待布局后再铺数据，确保容器尺寸就绪
     requestAnimationFrame(() => {
@@ -514,6 +549,7 @@ function applyGraphFilter() {
   }
   $('#graphHopCtl').classList.toggle('hidden', !(graph && graph.selectedIds.length));
   $('#graphEmpty').classList.toggle('hidden', papers.length > 0);
+  syncTimelineControls();
 }
 
 /* ---------------- 论文库 ---------------- */
@@ -1561,6 +1597,7 @@ function ensureGraph() {
     wrap: $('#graphCanvasWrap'),
     tooltipEl: $('#graphTooltip'),
     theme: localStorage.getItem('pg-theme') || 'dark',
+    viewMode: state.graphViewMode,
     onSelect: (primaryId, selectedIds) => {
       state.graphSelectedId = primaryId;
       // 跳数滑条：有选中时显示
@@ -1838,6 +1875,26 @@ function bindEvents() {
   $('#btnGraphFromLib').addEventListener('click', () => openGraph('library'));
   $('#btnGraphFromReader').addEventListener('click', () => openGraph('reader', state.readerPaperId));
   $('#btnGraphBack').addEventListener('click', closeGraph);
+  $$('[data-graph-mode]').forEach(button => {
+    button.addEventListener('click', () => {
+      state.graphViewMode = button.dataset.graphMode === 'timeline' ? 'timeline' : 'network';
+      localStorage.setItem('pg-graph-view-mode', state.graphViewMode);
+      if (graph) graph.setViewMode(state.graphViewMode);
+      syncGraphModeButtons();
+    });
+  });
+  $('#graphYearSelect').addEventListener('change', (e) => {
+    if (graph && graph.focusTimelineYear(e.target.value)) syncTimelineControls();
+  });
+  $('#graphPrevYear').addEventListener('click', () => {
+    if (graph && graph.stepTimelineYear(-1)) syncTimelineControls();
+  });
+  $('#graphNextYear').addEventListener('click', () => {
+    if (graph && graph.stepTimelineYear(1)) syncTimelineControls();
+  });
+  $('#graphZoomIn').addEventListener('click', () => { if (graph) graph.zoomView(0.8); });
+  $('#graphZoomOut').addEventListener('click', () => { if (graph) graph.zoomView(1.25); });
+  $('#graphZoomFit').addEventListener('click', () => { if (graph) graph.fitView(); });
   $('#graphMinRating').addEventListener('change', (e) => {
     state.graphMinRating = e.target.value;
     localStorage.setItem('pg-graph-min-rating', state.graphMinRating);

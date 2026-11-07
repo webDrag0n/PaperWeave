@@ -469,6 +469,55 @@ export async function runSelftest(ctx) {
     check('3D 图谱构建', graph && graph.nodes.length === 6, 'nodes=' + (graph && graph.nodes.length));
     check('图谱边数量与链接一致', graph && graph.edges.length === state.links.length, `edges=${graph && graph.edges.length} links=${state.links.length}`);
 
+    // ---------- 9.0 网络 / 时间线布局切换 ----------
+    const timelineBtn = document.querySelector('[data-graph-mode="timeline"]');
+    const networkBtn = document.querySelector('[data-graph-mode="network"]');
+    check('图谱布局切换按钮存在', !!timelineBtn && !!networkBtn);
+    if (timelineBtn && networkBtn) {
+      graph.select(attention.id);
+      timelineBtn.click();
+      await sleep(350);
+      check('时间线模式已激活', graph.viewMode === 'timeline' && timelineBtn.getAttribute('aria-pressed') === 'true');
+      check('时间线节点共面且按年份升序', graph.nodes.every(n => Math.abs(n.pos.z) < 1e-6) && graph.timelineColumns.every((c, i, a) => i === 0 || (a[i - 1].year !== null && (c.year === null || a[i - 1].year <= c.year))));
+      check('同年节点纵向避让', graph.nodes.every((a, i) => graph.nodes.every((b, j) => i === j || String(a.paper.year) !== String(b.paper.year) || Math.abs(a.pos.y - b.pos.y) >= 18)));
+      check('年份刻度与参考线已创建', graph.timelineColumns.length > 0 && graph.timelineGroup.children.length >= graph.timelineColumns.length * 2);
+      check('切换布局保留选中状态', graph.selectedIds.includes(attention.id));
+      const timelineControls = document.querySelector('#graphTimelineCtl');
+      const yearSelect = document.querySelector('#graphYearSelect');
+      check('时间线导航与缩放控件存在', !!timelineControls && !!yearSelect);
+      if (timelineControls && yearSelect) {
+        check('时间线工具条显示且年份选项完整', !timelineControls.classList.contains('hidden') && yearSelect.options.length === graph.timelineColumns.length, 'options=' + yearSelect.options.length);
+        const lastIndex = graph.timelineColumns.length - 1;
+        yearSelect.value = graph.timelineColumns[lastIndex].key;
+        yearSelect.dispatchEvent(new Event('change'));
+        await sleep(750);
+        check('年份下拉跳转定位相机', graph.activeTimelineKey === graph.timelineColumns[lastIndex].key && Math.abs(graph.controls.target.x - graph.timelineColumns[lastIndex].x) < 0.01);
+        document.querySelector('#graphPrevYear').click();
+        await sleep(750);
+        check('上一年按钮跳转', graph.activeTimelineKey === graph.timelineColumns[lastIndex - 1].key);
+        document.querySelector('#graphNextYear').click();
+        await sleep(750);
+        check('下一年按钮返回', graph.activeTimelineKey === graph.timelineColumns[lastIndex].key);
+        const distanceBeforeZoom = graph.camera.position.distanceTo(graph.controls.target);
+        document.querySelector('#graphZoomIn').click();
+        await sleep(350);
+        const distanceAfterZoomIn = graph.camera.position.distanceTo(graph.controls.target);
+        check('时间线放大缩短相机距离', distanceAfterZoomIn < distanceBeforeZoom, `${distanceBeforeZoom.toFixed(1)}→${distanceAfterZoomIn.toFixed(1)}`);
+        document.querySelector('#graphZoomOut').click();
+        await sleep(350);
+        check('时间线缩小恢复相机距离', Math.abs(graph.camera.position.distanceTo(graph.controls.target) - distanceBeforeZoom) < 0.1);
+        document.querySelector('#graphZoomFit').click();
+        await sleep(750);
+        check('适配全图保持当前年份', graph.activeTimelineKey === graph.timelineColumns[lastIndex].key);
+      }
+      await bridge.selftestShot('04-graph-timeline');
+      networkBtn.click();
+      await sleep(350);
+      check('切回网络模式并恢复三维布局', graph.viewMode === 'network' && graph.timelineGroup.children.length === 0 && graph.nodes.some(n => Math.abs(n.pos.z) > 0.01));
+      check('切回网络仍保留选中状态', graph.selectedIds.includes(attention.id));
+      graph.select(null);
+    }
+
     // 选中 Attention（默认 2 跳）：BERT/ViT/S2S/GPT 均 1 跳蓝色；ResNet 2 跳橙色
     const s2s = state.papers.find(p => /Sequence to Sequence/i.test(p.title || ''));
     const resnet = state.papers.find(p => /ResNet|Residual/i.test(p.title || ''));

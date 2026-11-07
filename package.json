@@ -11,6 +11,7 @@
     "dev": "node tools/dev-server.js",
     "selftest": "node tools/selftest.js",
     "citationtest": "node tools/citation-index-test.js && node tools/reference-extraction-test.js",
+    "graphtest": "node tools/graph-layout-test.js",
     "downloadtest": "node tools/adaptive-scheduler-test.js && node tools/download-service-test.js",
     "pack": "node tools/build.js --dir",
     "dist": "node tools/build.js",

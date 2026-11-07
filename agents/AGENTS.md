@@ -349,6 +349,7 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/graph
 | 4（HTTP 不变） | 0.9.0 | 论文库新增 `desc`（简介）与 `pinned`（置顶）字段；新增 `PATCH /api/libraries/{id}` 与 `POST /api/libraries/reorder`；GUI：论文库列表改为左侧可展开/缩回的卡片面板（编辑/置顶/拖拽排序/输名删除）；「导入文件」与「链接导入」合并为统一导入弹窗（链接 + 拖文件 + 选文件）；默认初始论文库名称改为 `New Graph`；MCP 增至 25 个工具 |
 | 5 | 1.0.0 | **品牌更名 PaperGraph → PaperWeave**：鉴权头改为 `X-PaperWeave-Token`，环境变量 `PAPERWEAVE_S2_API_KEY`，MCP Server 更名 `paperweave-mcp.js`（工具前缀 `paperweave_`），数据目录 `paperweave-data`（首次启动自动从旧 `papergraph-data` 迁移）；默认初始论文库名改为 `New Weave`；GUI：新增相似论文区（文献耦合 × 同被引 Top 5）与「库外发现」面板（经典先驱 / 衍生新作聚合推荐，一键下载入库）；新品牌 Logo 全面实装 |
 | 6 | 1.2.0 | 多链接导入与 `download-all-refs` 改为自适应并行（初始 3、范围 1–6，按网络反馈与 429 调整）；进度对象新增可选 `active / pending / concurrency / failed`；并发导入增加哈希复核；PDF 参考文献提取修复扩窗页序，支持无编号条目、机构作者和附录截断，旧论文抓取时可从本地 PDF 按需重建；阅读器与 3D 节点侧栏同步显示抓取／下载进度 |
+| 6（HTTP 不变） | 1.2.0 | GUI：3D 引用图谱新增按发表年份排布的时间线视图，同年节点纵向避让，未知年份独立成列；支持年份下拉跳转、前后年份导航、缩放与适配全图，并保留筛选、选中、多选和节点详情交互 |
 
 > **维护者注意**：新增/修改接口或数据字段时，必须同步更新本文件并递增 API 版本号；
 > 本文件位于源码仓库 `agents/AGENTS.md`，打包时随应用分发（安装版在 `resources/AGENTS.md`，

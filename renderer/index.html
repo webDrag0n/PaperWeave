@@ -110,6 +110,10 @@
     <section id="graphView" class="view hidden">
       <div id="graphCanvasWrap"></div>
       <button class="btn graph-back" id="btnGraphBack">← 返回论文库</button>
+      <div class="graph-mode-switch" role="group" aria-label="图谱布局">
+        <button class="active" type="button" data-graph-mode="network" aria-pressed="true" data-i18n="网络">网络</button>
+        <button type="button" data-graph-mode="timeline" aria-pressed="false" data-i18n="时间线">时间线</button>
+      </div>
       <div class="graph-filter">
         <label for="graphMinRating" data-i18n="节点筛选">节点筛选</label>
         <select id="graphMinRating">
@@ -122,6 +126,15 @@
         </select>
       </div>
       <div id="graphEmpty" class="hidden" data-i18n="当前筛选条件下没有论文">当前筛选条件下没有论文</div>
+      <div id="graphTimelineCtl" class="graph-timeline-ctl hidden">
+        <button type="button" id="graphPrevYear" data-i18n-title="上一年" title="上一年" aria-label="上一年">←</button>
+        <select id="graphYearSelect" data-i18n-title="跳转到发表年份" title="跳转到发表年份" aria-label="跳转到发表年份"></select>
+        <button type="button" id="graphNextYear" data-i18n-title="下一年" title="下一年" aria-label="下一年">→</button>
+        <span class="timeline-ctl-separator"></span>
+        <button type="button" id="graphZoomOut" data-i18n-title="缩小" title="缩小" aria-label="缩小">−</button>
+        <button type="button" id="graphZoomFit" class="timeline-fit" data-i18n="适配" title="适配全部论文">适配</button>
+        <button type="button" id="graphZoomIn" data-i18n-title="放大" title="放大" aria-label="放大">＋</button>
+      </div>
       <div id="graphHopCtl" class="graph-hop hidden">
         <span data-i18n="高亮跳数">高亮跳数</span>
         <input type="range" id="hopRange" min="1" max="5" step="1" value="2">
