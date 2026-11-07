@@ -1,6 +1,6 @@
 {
   "name": "paperweave",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "PaperWeave - lightweight cross-platform paper reader with 3D citation graph",
   "main": "main/main.js",
   "author": "PaperWeave",
@@ -10,7 +10,8 @@
     "start": "electron .",
     "dev": "node tools/dev-server.js",
     "selftest": "node tools/selftest.js",
-    "citationtest": "node tools/citation-index-test.js",
+    "citationtest": "node tools/citation-index-test.js && node tools/reference-extraction-test.js",
+    "downloadtest": "node tools/adaptive-scheduler-test.js && node tools/download-service-test.js",
     "pack": "node tools/build.js --dir",
     "dist": "node tools/build.js",
     "dist:win": "node tools/build.js --win",
@@ -35,6 +36,7 @@
       "main/**/*",
       "preload/**/*",
       "renderer/**/*",
+      "shared/**/*",
       "vendor/**/*",
       "assets/**/*",
       "package.json"

@@ -166,6 +166,16 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
+  ipcMain.handle('papers:importUrls', async (e, urls, operationId) => {
+    const onProgress = (p) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('import:progress', { operationId, ...p });
+    };
+    try {
+      return { ok: true, ...(await service.importFromUrls(urls, {}, onProgress)) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 
   ipcMain.handle('ann:list', (e, paperId) => store.getAnnotations(paperId));
   ipcMain.handle('ann:save', (e, paperId, anns) => store.setAnnotations(paperId, anns));

@@ -766,6 +766,26 @@ function renderImportQueue() {
   prog.innerHTML = pendingImportFiles.map(f => `<div>📄 ${esc(f.name)}（${t('待导入')}）</div>`).join('');
 }
 
+function handleImportProgress(p) {
+  if (!p || !p.operationId) return;
+  const prog = $('#urlProgress');
+  const summary = prog.querySelector('#urlBatchSummary');
+  if (summary) {
+    const stats = [tf('并发 {n}', { n: p.concurrency || 1 })];
+    if (p.active > 0) stats.push(tf('{n} 进行中', { n: p.active }));
+    if (p.pending > 0) stats.push(tf('{n} 等待中', { n: p.pending }));
+    if (p.failed > 0) stats.push(tf('{n} 失败', { n: p.failed }));
+    summary.textContent = `${p.current || 0} / ${p.total || 0} · ${stats.join(' · ')}`;
+  }
+  const rows = [...prog.querySelectorAll('[data-import-url]')].filter(el => el.dataset.importUrl === p.currentItem);
+  for (const row of rows) {
+    if (p.status === 'error') row.className = 'err';
+    else if (p.status === 'success') row.className = 'ok';
+    const icon = p.status === 'error' ? '✗' : p.status === 'success' ? '✓' : '⏳';
+    row.textContent = `${icon} ${p.currentItem} — ${p.note || ''}`;
+  }
+}
+
 async function runImport() {
   const urls = $('#urlInput').value.split('\n').map(s => s.trim()).filter(Boolean);
   const files = pendingImportFiles;
@@ -792,24 +812,40 @@ async function runImport() {
     line.textContent = tf('✓ 文件导入完成（{n} 个）', { n: files.length });
     pendingImportFiles = [];
   }
-  // 2) 链接
-  for (const u of urls) {
-    const line = document.createElement('div');
-    line.textContent = '⏳ ' + u;
-    prog.appendChild(line);
-    const r = await bridge.importUrl(u);
-    if (r.ok === false || r.error) {
-      line.className = 'err';
-      line.textContent = '✗ ' + u + ' — ' + (r.error || '失败');
-      results.push({ error: r.error || '失败' });
-    } else if (r.conflict) {
-      line.textContent = '❓ ' + u;
-      results.push({ conflict: r.conflict });
-    } else {
-      line.className = 'ok';
-      line.textContent = (r.duplicate ? '↺ 已存在：' : r.reused ? '↺ 复用已有：' : '✓ ') + (r.paper ? r.paper.title : u);
-      results.push(r);
+  // 2) 链接：一次提交整批，主进程／浏览器调度器自适应并行。
+  if (urls.length) {
+    const operationId = 'imp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    const summary = document.createElement('div');
+    summary.id = 'urlBatchSummary';
+    summary.textContent = tf('准备并行下载 {n} 个链接…', { n: urls.length });
+    prog.appendChild(summary);
+    const rows = new Map();
+    for (const u of urls) {
+      const row = document.createElement('div');
+      row.dataset.importUrl = u;
+      row.textContent = '⏳ ' + u;
+      prog.appendChild(row);
+      rows.set(u, row);
     }
+    const batch = await bridge.importUrls(urls, operationId);
+    const batchResults = batch.results || urls.map(() => ({ error: batch.error || '批量导入失败' }));
+    batchResults.forEach((r, i) => {
+      const u = urls[i];
+      const row = rows.get(u);
+      if (r.ok === false || r.error) {
+        if (row) { row.className = 'err'; row.textContent = '✗ ' + u + ' — ' + (r.error || '失败'); }
+        results.push({ error: r.error || '失败' });
+      } else if (r.conflict) {
+        if (row) row.textContent = '❓ ' + u;
+        results.push({ conflict: r.conflict });
+      } else {
+        if (row) {
+          row.className = 'ok';
+          row.textContent = (r.duplicate ? '↺ 已存在：' : r.reused ? '↺ 复用已有：' : '✓ ') + (r.paper ? r.paper.title : u);
+        }
+        results.push(r);
+      }
+    });
   }
   $('#importGo').disabled = false;
   await handleImportResults(results);
@@ -1304,10 +1340,16 @@ async function fetchRefsFor(paperId) {
   // 组合：参考文献 + 被引（卡片与图谱按钮走这里）
   const p = paperById(paperId);
   toast(tf('正在抓取《{t}》的引用关系…', { t: (p.title || '').slice(0, 30) + '…' }));
+  receiveRefsProgress({ paperId, stage: 'references', current: 0, total: 0, currentItem: p.title || '', note: t('正在定位论文并准备抓取…'), at: Date.now() });
+  const graphFetchBtn = $('#graphSideFetch');
+  if (graphFetchBtn) graphFetchBtn.disabled = true;
   refsProgressUI.begin();
   let r;
   try { r = await bridge.fetchRefs(paperId); }
-  finally { refsProgressUI.end(); }
+  finally {
+    refsProgressUI.end();
+    if (graphFetchBtn) graphFetchBtn.disabled = false;
+  }
   await afterRefsChanged(paperId);
   if (!r.ok) { refsMsg(r.error, true); toast(r.error, true, 5000); return; }
   const parts = [];
@@ -1396,7 +1438,34 @@ function refsMsg(msg, isErr = false) {
   el.classList.toggle('ok', !!msg && !isErr);
 }
 
-/* ---- 抓取/下载进度条（事件已在主进程节流至 10Hz，渲染开销小） ---- */
+/* ---- 抓取/下载进度条：阅读器与 3D 图谱共用同一事件流 ---- */
+const latestRefsProgress = new Map();
+function renderRefsProgress(root, p) {
+  if (!root || !p) return;
+  const stageEl = root.querySelector('[data-rp-stage]');
+  const countEl = root.querySelector('[data-rp-count]');
+  const fill = root.querySelector('[data-rp-fill]');
+  const item = root.querySelector('[data-rp-item]');
+  const stageName = { citations: t('📥 抓取被引'), references: t('📤 抓取引用（参考文献）'), download: t('⏬ 下载引用文献') }[p.stage] || p.stage || t('抓取中');
+  stageEl.textContent = stageName;
+  const stats = [];
+  if (p.active > 0) stats.push(tf('{n} 进行中', { n: p.active }));
+  if (p.pending > 0) stats.push(tf('{n} 等待中', { n: p.pending }));
+  if (p.concurrency > 0) stats.push(tf('并发 {n}', { n: p.concurrency }));
+  if (p.failed > 0) stats.push(tf('{n} 失败', { n: p.failed }));
+  if (p.total > 0) {
+    countEl.textContent = `${Math.min(p.current, p.total)} / ${p.total}` + (stats.length ? ' · ' + stats.join(' · ') : '');
+    fill.classList.remove('indeterminate');
+    fill.style.width = Math.min(100, Math.round(p.current / p.total * 100)) + '%';
+  } else {
+    countEl.textContent = '…' + (stats.length ? ' · ' + stats.join(' · ') : '');
+    fill.classList.add('indeterminate');
+  }
+  const note = p.note ? `<span class="rp-note">${esc(p.note)}</span> ` : '';
+  item.innerHTML = note + (p.currentItem ? esc(p.currentItem) : '');
+  item.title = [p.note, p.currentItem].filter(Boolean).join(' ');
+}
+
 const refsProgressUI = {
   active: 0,
   begin() {
@@ -1418,25 +1487,35 @@ const refsProgressUI = {
     }
   },
   update(p) {
-    // 后台自动抓取的进度也要可见（无 begin/end 配对，3 秒无事件自动隐藏）
     $('#refsProgress').classList.remove('hidden');
     clearTimeout(this._hideT);
     this._hideT = setTimeout(() => { if (!this.active) $('#refsProgress').classList.add('hidden'); }, 3000);
-    const stageEl = $('#rpStage'), countEl = $('#rpCount'), fill = $('#rpFill'), item = $('#rpItem');
-    const stageName = { citations: t('📥 抓取被引'), references: t('📤 抓取引用（参考文献）'), download: t('⏬ 下载引用文献') }[p.stage] || p.stage;
-    stageEl.textContent = stageName;
-    if (p.total > 0) {
-      countEl.textContent = `${Math.min(p.current, p.total)} / ${p.total}`;
-      fill.classList.remove('indeterminate');
-      fill.style.width = Math.min(100, Math.round(p.current / p.total * 100)) + '%';
-    } else {
-      countEl.textContent = '…';
-      fill.classList.add('indeterminate');
-    }
-    const note = p.note ? `<span class="rp-note">${esc(p.note)}</span> ` : '';
-    item.innerHTML = note + (p.currentItem ? esc(p.currentItem) : '');
+    renderRefsProgress($('#refsProgress'), p);
   },
 };
+
+const graphRefsProgressUI = {
+  update(p) {
+    const root = $('#graphSideProgress');
+    root.classList.remove('hidden');
+    renderRefsProgress(root, p);
+    clearTimeout(this._hideT);
+    this._hideT = setTimeout(() => root.classList.add('hidden'), 4000);
+  },
+  restore(paperId) {
+    const root = $('#graphSideProgress');
+    const p = latestRefsProgress.get(paperId);
+    if (p && Date.now() - (p.at || 0) < 4000) this.update(p);
+    else root.classList.add('hidden');
+  },
+};
+
+function receiveRefsProgress(p) {
+  if (!p || !p.paperId) return;
+  latestRefsProgress.set(p.paperId, { ...p, at: p.at || Date.now() });
+  if (state.view === 'reader' && p.paperId === state.readerPaperId) refsProgressUI.update(p);
+  if (state.view === 'graph' && p.paperId === state.graphSelectedId) graphRefsProgressUI.update(p);
+}
 
 /* ---- 手动关联 ---- */
 function openLinkModal() {
@@ -1659,6 +1738,7 @@ function showGraphSide(id, selectedIds) {
   const extN = (p.externalRefs || []).length;
   // 先显示面板再填充：作者折叠依赖 scrollHeight 测量
   $('#graphSide').classList.remove('hidden');
+  graphRefsProgressUI.restore(id);
   $('#graphSideTitle').innerHTML = inlineMd(p.title);
   const multi = selectedIds && selectedIds.length > 1
     ? `<div style="color:#ffd54a;margin-bottom:6px">${tf('◈ 已多选 {n} 篇，它们之间的最短关联已用轮廓高亮', { n: selectedIds.length })}</div>` : '';
@@ -2093,13 +2173,9 @@ async function init() {
     });
   }
 
-  // 抓取进度事件 → 进度条（含 Agent API 触发的抓取）
-  if (bridge.onRefsProgress) {
-    bridge.onRefsProgress((p) => {
-      if (p.paperId !== state.readerPaperId || state.view !== 'reader') return;
-      refsProgressUI.update(p);
-    });
-  }
+  // 抓取进度事件 → 阅读器与图谱（含后台队列和 Agent API 触发的抓取）
+  if (bridge.onRefsProgress) bridge.onRefsProgress(receiveRefsProgress);
+  if (bridge.onImportProgress) bridge.onImportProgress(handleImportProgress);
 
   // 自测钩子
   if (new URLSearchParams(location.search).has('selftest')) {
@@ -2111,4 +2187,4 @@ async function init() {
 window.addEventListener('DOMContentLoaded', init);
 
 // 暴露给自测
-window.__pg = { state, get viewer() { return viewer; }, get graph() { return graph; }, get citationPopup() { return citationPopup; }, refsProgressUI, resolveConflicts, bibtexOf, sim: { computeSimEdges, topSimilar, aggregateExternal } };
+window.__pg = { state, get viewer() { return viewer; }, get graph() { return graph; }, get citationPopup() { return citationPopup; }, refsProgressUI, receiveRefsProgress, handleImportProgress, resolveConflicts, bibtexOf, sim: { computeSimEdges, topSimilar, aggregateExternal } };

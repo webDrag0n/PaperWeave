@@ -3,12 +3,16 @@ const path = require('path');
 const fs = require('fs');
 const { net } = require('electron');
 const { extractPdfInfo, bufferIntoLibrary } = require('./importer');
-const { fetchReferencesOnline, fetchCitationsOnline, matchReferencesToLibrary, extractArxivId, fetchArxivMeta, findRefPdfUrl } = require('./refs');
+const { fetchReferencesOnline, fetchCitationsOnline, matchReferencesToLibrary, splitReferenceEntries, extractArxivId, fetchArxivMeta, findRefPdfUrl } = require('./refs');
+const { createDownloadQueue } = require('./download-queue');
 
 function uid() { return 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
 function createService(store, opts = {}) {
   const progressFor = typeof opts.progressFor === 'function' ? opts.progressFor : () => undefined;
+  const runDownloadTasks = createDownloadQueue();
+  const fetchImpl = typeof opts.fetch === 'function' ? opts.fetch : (...args) => net.fetch(...args);
+  const referencesOnline = typeof opts.referencesOnline === 'function' ? opts.referencesOnline : fetchReferencesOnline;
   // 待确认的导入（GUI 弹窗确认走这里）：token → { buf, nameHint, info, candidates }
   const pendingImports = new Map();
   const PENDING_TTL = 10 * 60 * 1000;
@@ -45,18 +49,21 @@ function createService(store, opts = {}) {
   const autoFetchEnabled = process.env.PAPERWEAVE_AUTOFETCH !== '0' && process.env.PAPERWEAVE_SELFTEST !== '1';
   const autoQueue = [];
   let autoRunning = false;
+  let autoActiveId = null;
   async function autoFetchWorker() {
     if (autoRunning) return;
     autoRunning = true;
     while (autoQueue.length) {
       const { paperId, onProgress } = autoQueue.shift();
+      autoActiveId = paperId;
       try { await fetchRefs(paperId, onProgress); } catch (_) { /* 静默：网络不可用时跳过 */ }
+      autoActiveId = null;
     }
     autoRunning = false;
   }
   function scheduleAutoFetch(paperId, onProgress) {
     if (!autoFetchEnabled || !paperId) return;
-    if (autoQueue.some(q => q.paperId === paperId)) return;
+    if (autoActiveId === paperId || autoQueue.some(q => q.paperId === paperId)) return;
     autoQueue.push({ paperId, onProgress });
     setTimeout(autoFetchWorker, 1200); // 稍作延迟，让导入流程先完成
   }
@@ -79,6 +86,13 @@ function createService(store, opts = {}) {
       if (!info.title) info.title = path.basename(nameHint || '未命名论文', '.pdf');
     } catch (e) {
       console.error('extract failed:', e.message);
+    }
+    // 并行任务可能在等待 PDF 提取期间注册了相同内容，入库前必须再次复核。
+    const concurrentHash = store.findByHash(hash);
+    if (concurrentHash) {
+      const inCurrent = store.paperInLibraries(concurrentHash.id).includes(store.currentLibraryId());
+      if (!inCurrent) store.addToLibrary(concurrentHash.id);
+      return { paper: pub(concurrentHash), duplicate: inCurrent, reused: !inCurrent };
     }
     // 3) 疑似重复冲突：DOI 相同（不同版本）或标题高度相似
     const conflicts = findImportConflicts(info, hash);
@@ -163,13 +177,36 @@ function createService(store, opts = {}) {
     } catch (_) { return url; }
   }
 
+  async function importFromUrls(urls, opts = {}, onProgress) {
+    const input = Array.isArray(urls) ? urls : [];
+    const tasks = input.map(url => {
+      const finalUrl = normalizePaperUrl(url);
+      return {
+        key: finalUrl,
+        url: finalUrl,
+        label: url,
+        run: () => importFromUrl(url, opts),
+      };
+    });
+    const outcomes = await runDownloadTasks(tasks, onProgress ? p => onProgress({ ...p, stage: 'import' }) : undefined);
+    return {
+      results: outcomes.map((r, i) => r.ok ? r.value : { error: r.error.message, url: input[i] }),
+    };
+  }
+
   async function importFromUrl(url, opts = {}) {
     const finalUrl = normalizePaperUrl(url);
-    const res = await net.fetch(finalUrl, {
+    const res = await fetchImpl(finalUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 PaperWeave/0.3' },
       redirect: 'follow',
     });
-    if (!res.ok) throw new Error('下载失败：HTTP ' + res.status);
+    if (!res.ok) {
+      const err = new Error('下载失败：HTTP ' + res.status);
+      err.status = res.status;
+      const retryAfter = Number(res.headers.get('retry-after'));
+      if (Number.isFinite(retryAfter) && retryAfter > 0) err.retryAfter = retryAfter;
+      throw err;
+    }
     const ct = (res.headers.get('content-type') || '').toLowerCase();
     const buf = Buffer.from(await res.arrayBuffer());
     const looksPdf = buf.length > 4 && buf.slice(0, 5).toString('latin1') === '%PDF-';
@@ -207,7 +244,19 @@ function createService(store, opts = {}) {
     const paper = store.getPaper(paperId);
     if (!paper) return { ok: false, error: '论文不存在' };
     try {
-      const r = await fetchReferencesOnline(paper, store.data.papers, { onProgress });
+      // 兼容旧版本已入库论文：refText 为空或旧格式不可切分时，用新提取器从本地 PDF 重建。
+      if (!splitReferenceEntries(paper.refText || '').length) {
+        const fp = store.paperFilePath(paper);
+        if (fp && fs.existsSync(fp)) {
+          if (onProgress) onProgress({ stage: 'references', current: 0, total: 0, currentItem: paper.title || '', note: '正在从 PDF 重新提取参考文献…' });
+          const extracted = await extractPdfInfo(fs.readFileSync(fp));
+          if (extracted.refText) {
+            store.updatePaper(paperId, { refText: extracted.refText });
+            paper.refText = extracted.refText;
+          }
+        }
+      }
+      const r = await referencesOnline(paper, store.data.papers, { onProgress });
       if (!r.ok) return r;
       let added = 0;
       for (const l of r.links) {
@@ -279,27 +328,34 @@ function createService(store, opts = {}) {
     return { ok: true, paper: { ...newPaper, refText: undefined }, duplicate: !!result.duplicate };
   }
 
-  // 一键下载全部未入库引用（dir: out / in / both），逐条处理并推送进度
+  // 一键下载全部未入库引用（dir: out / in / both），自适应并行并统一聚合进度
   async function downloadAllRefs(paperId, dir, onProgress) {
     const paper = store.getPaper(paperId);
     if (!paper) return { ok: false, error: '论文不存在' };
     const emit = onProgress || (() => {});
     const want = (paper.externalRefs || []).filter(r => dir === 'both' || !dir || r.dir === dir);
     if (!want.length) return { ok: true, total: 0, downloaded: 0, skipped: 0, failed: [] };
+    const tasks = want.map(ref => ({
+      key: paperId + ':' + ref.key,
+      url: ref.arxivId ? 'https://arxiv.org/pdf/' + ref.arxivId : (ref.doi || ref.title),
+      label: ref.title.slice(0, 60),
+      run: async () => {
+        const r = await downloadRef(paperId, ref.key);
+        if (!r.ok) throw new Error(r.error || '下载失败');
+        return { ref, result: r };
+      },
+    }));
+    const outcomes = await runDownloadTasks(tasks, p => emit({ ...p, stage: 'download' }));
     let downloaded = 0, skipped = 0;
     const failed = [];
-    for (let i = 0; i < want.length; i++) {
-      const ref = want[i];
-      emit({ stage: 'download', current: i, total: want.length, currentItem: ref.title.slice(0, 60), note: '解析下载地址…' });
-      try {
-        const r = await downloadRef(paperId, ref.key);
-        if (r.ok) { if (r.duplicate) skipped++; else downloaded++; }
-        else failed.push({ title: ref.title.slice(0, 80), error: r.error });
-      } catch (e) {
-        failed.push({ title: ref.title.slice(0, 80), error: e.message });
+    outcomes.forEach((r, i) => {
+      if (r.ok) {
+        if (r.value.result.duplicate) skipped++;
+        else downloaded++;
+      } else {
+        failed.push({ title: want[i].title.slice(0, 80), error: r.error.message });
       }
-      emit({ stage: 'download', current: i + 1, total: want.length, currentItem: ref.title.slice(0, 60), note: failed.length && failed[failed.length - 1].title === ref.title.slice(0, 80) ? '失败：' + failed[failed.length - 1].error.slice(0, 40) : '完成 ✓' });
-    }
+    });
     return { ok: true, total: want.length, downloaded, skipped, failed };
   }
 
@@ -339,7 +395,7 @@ function createService(store, opts = {}) {
     return { ok: true, matched: matches.length, added };
   }
 
-  return { importOnePdfBuffer, importFromPaths, importFromUrl, fetchRefs, fetchReferences, fetchCitations, autoMatch, downloadRef, downloadAllRefs, resolveImport };
+  return { importOnePdfBuffer, importFromPaths, importFromUrl, importFromUrls, fetchRefs, fetchReferences, fetchCitations, autoMatch, downloadRef, downloadAllRefs, resolveImport };
 }
 
 module.exports = { createService };

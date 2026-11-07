@@ -485,6 +485,21 @@ export async function runSelftest(ctx) {
     // 模拟真实点击选择后的回调（onSelect 驱动滑条显隐）
     graph.opts.onSelect(attention.id, graph.selectedIds);
     check('选中后跳数滑条显示', !document.querySelector('#graphHopCtl').classList.contains('hidden'));
+
+    // 图谱内显示当前节点的并行抓取／下载进度，切换节点时严格隔离。
+    check('图谱侧栏包含引用进度区', !!document.querySelector('#graphSideProgress'));
+    if (window.__pg.receiveRefsProgress) {
+      window.__pg.receiveRefsProgress({ paperId: attention.id, stage: 'download', current: 2, total: 5, active: 2, pending: 3, concurrency: 3, currentItem: 'Parallel reference', note: '下载中…' });
+      const gp = document.querySelector('#graphSideProgress');
+      check('图谱显示并行进度与并发数', gp && !gp.classList.contains('hidden') && gp.textContent.includes('2 / 5') && gp.textContent.includes('并发 3'), gp && gp.textContent);
+      graph.opts.onSelect(bert.id, [bert.id]);
+      check('切换节点不显示上一论文进度', gp && gp.classList.contains('hidden'), gp && gp.textContent);
+      window.__pg.receiveRefsProgress({ paperId: bert.id, stage: 'references', current: 1, total: 4, currentItem: 'BERT reference', note: '解析中' });
+      check('新节点显示自己的抓取进度', gp && !gp.classList.contains('hidden') && gp.textContent.includes('1 / 4') && gp.textContent.includes('BERT reference'), gp && gp.textContent);
+    } else {
+      check('图谱进度事件入口已暴露', false);
+    }
+    graph.opts.onSelect(attention.id, [attention.id]);
     await bridge.selftestShot('05-graph-selected');
 
     // ---------- 9.1 流光方向 + 详情栏引用列表 + BibTeX ----------
@@ -915,6 +930,20 @@ export async function runSelftest(ctx) {
     await sleep(150);
     check('统一导入弹窗打开', !document.querySelector('#importModal').classList.contains('hidden'));
     check('弹窗含拖放区与链接输入', !!document.querySelector('#importDrop') && !!document.querySelector('#urlInput'));
+    const originalImportUrls = bridge.importUrls;
+    let importBatchCalls = 0;
+    bridge.importUrls = async (urls, operationId) => {
+      importBatchCalls++;
+      window.__pg.handleImportProgress({ operationId, key: urls[0], currentItem: urls[0], status: 'start', current: 0, total: 2, active: 2, pending: 0, concurrency: 2, note: '下载中…' });
+      window.__pg.handleImportProgress({ operationId, key: urls[1], currentItem: urls[1], status: 'success', current: 2, total: 2, active: 0, pending: 0, concurrency: 2, note: '完成 ✓' });
+      return { ok: true, results: urls.map(() => ({ paper: attention, duplicate: true })) };
+    };
+    document.querySelector('#urlInput').value = 'https://example.test/a.pdf\nhttps://example.test/b.pdf';
+    document.querySelector('#importGo').click();
+    await sleep(600);
+    check('多链接通过一次批量接口并行导入', importBatchCalls === 1, 'calls=' + importBatchCalls);
+    check('导入弹窗显示批次并发与完成数', document.querySelector('#urlProgress').textContent.includes('2 / 2') && document.querySelector('#urlProgress').textContent.includes('并发 2'), document.querySelector('#urlProgress').textContent);
+    bridge.importUrls = originalImportUrls;
     document.querySelector('#importCancel').click();
     check('导入弹窗关闭', document.querySelector('#importModal').classList.contains('hidden'));
 

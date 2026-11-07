@@ -120,6 +120,12 @@ const DICT = {
   '移除这条引用关联': 'Remove this citation link',
   '未能在线识别': 'unresolved',
   '抓取中': 'Fetching',
+  '{n} 进行中': '{n} active',
+  '{n} 等待中': '{n} queued',
+  '并发 {n}': 'Concurrency {n}',
+  '{n} 失败': '{n} failed',
+  '正在定位论文并准备抓取…': 'Locating paper and preparing fetch…',
+  '准备并行下载 {n} 个链接…': 'Preparing {n} parallel downloads…',
 
   /* ---------- 图谱 ---------- */
   '← 返回论文库': '← Back to library',

@@ -797,8 +797,8 @@ button { font-family: inherit; }
   padding: 10px 12px; margin-bottom: 10px;
 }
 .rp-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 7px; }
-.rp-head #rpStage { color: var(--accent); font-weight: 600; }
-.rp-head #rpCount { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.rp-head [data-rp-stage] { color: var(--accent); font-weight: 600; }
+.rp-head [data-rp-count] { color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .rp-bar { height: 6px; border-radius: 3px; background: var(--bg2); overflow: hidden; }
 .rp-fill {
   height: 100%; width: 0%; border-radius: 3px;

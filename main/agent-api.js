@@ -53,7 +53,7 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
 
     // 公共探活
     if (u.pathname === '/api/ping') {
-      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 5 });
+      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 6 });
     }
     // 鉴权
     if (req.headers['x-paperweave-token'] !== token) {

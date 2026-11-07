@@ -143,6 +143,14 @@
         <button class="icon-btn close" id="graphSideClose">✕</button>
         <h3 id="graphSideTitle"></h3>
         <div class="meta" id="graphSideMeta"></div>
+        <div id="graphSideProgress" class="refs-progress hidden" aria-live="polite">
+          <div class="rp-head">
+            <span data-rp-stage>抓取中</span>
+            <span data-rp-count></span>
+          </div>
+          <div class="rp-bar"><div class="rp-fill" data-rp-fill></div></div>
+          <div class="rp-item" data-rp-item></div>
+        </div>
         <div class="row" id="graphSideRefs"></div>
         <div class="row" id="graphSideCites"></div>
         <div class="row" id="graphSideSim"></div>
@@ -241,13 +249,13 @@
               <button class="btn small" id="btnAutoMatch" data-i18n="🧩 离线匹配" data-i18n-title="解析参考文献段落，与库内论文离线匹配" title="解析参考文献段落，与库内论文离线匹配">🧩 离线匹配</button>
               <button class="btn small" id="btnManualLink" data-i18n="➕ 手动关联" data-i18n-title="手动添加“本文引用了库内某论文”" title="手动添加“本文引用了库内某论文”">➕ 手动关联</button>
             </div>
-            <div id="refsProgress" class="refs-progress hidden">
+            <div id="refsProgress" class="refs-progress hidden" aria-live="polite">
               <div class="rp-head">
-                <span id="rpStage">抓取中</span>
-                <span id="rpCount"></span>
+                <span id="rpStage" data-rp-stage>抓取中</span>
+                <span id="rpCount" data-rp-count></span>
               </div>
-              <div class="rp-bar"><div class="rp-fill" id="rpFill"></div></div>
-              <div class="rp-item" id="rpItem"></div>
+              <div class="rp-bar"><div class="rp-fill" id="rpFill" data-rp-fill></div></div>
+              <div class="rp-item" id="rpItem" data-rp-item></div>
             </div>
             <div id="refsMsg" class="refs-msg"></div>
             <details id="refsUnresolvedWrap" class="refs-unresolved hidden">

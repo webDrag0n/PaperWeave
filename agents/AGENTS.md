@@ -6,7 +6,7 @@
 
 - 应用：PaperWeave（跨平台论文阅读器，Windows / macOS / Linux）
 - 接口形式：本地 HTTP JSON API（`127.0.0.1`，仅本机回环）+ MCP stdio Server（`paperweave-mcp.js`）
-- API 版本：`5`（自 PaperWeave 1.0.0 起；鉴权头 `X-PaperWeave-Token`）
+- API 版本：`6`（自 PaperWeave 1.2.0 起；鉴权头 `X-PaperWeave-Token`）
 
 > **0.8.0 多论文库架构**：论文本体全局统一存储（每篇论文唯一 id，PDF 内容哈希命名共享一份文件），
 > 论文库（library）只记录「包含哪些论文 id + 库内引用关联」。批注 / 笔记 / 评星随论文全局保存。
@@ -270,30 +270,35 @@ curl -X POST -H "X-PaperWeave-Token: $TOKEN" -H "Content-Type: application/json"
 | GET | `/api/links` | 全部引用边 |
 | POST | `/api/links` | 新增 `{ "from": "p_a", "to": "p_b" }`（含义：p_a 引用了 p_b） |
 | DELETE | `/api/links/{linkId}` | 删除一条边 |
-| POST | `/api/papers/{id}/fetch-references` | 抓取"引用"：优先 Semantic Scholar 结构化参考文献（分页拉取 ≤500 条，含标题/DOI/arXiv/作者/被引数），未收录时回退 PDF 参考文献段落逐条检索（DOI(CrossRef)/arXiv/S2标题匹配/OpenAlex）；未入库条目存入 `externalRefs`（dir=out）；响应含 `source`、`unresolved`（≤20 条）与 `external`（未入库数量） |
+| POST | `/api/papers/{id}/fetch-references` | 抓取"引用"：优先 Semantic Scholar 结构化参考文献（分页拉取 ≤500 条，含标题/DOI/arXiv/作者/被引数），未收录时回退 PDF 参考文献段落逐条检索（DOI(CrossRef)/arXiv/S2标题匹配/OpenAlex）；支持编号及无编号参考文献、机构作者与附录截断；未入库条目存入 `externalRefs`（dir=out）；响应含 `source`、`unresolved`（≤20 条）与 `external`（未入库数量） |
 | POST | `/api/papers/{id}/fetch-citations` | 抓取"被引"：Semantic Scholar（限流退避），失败自动回退 OpenAlex；未入库被引存入 `externalRefs`（dir=in，按被引数降序 ≤100 条） |
 | POST | `/api/papers/{id}/download-ref` | 下载单条未入库引用：Body `{"key": "<externalRefs 条目 key>"}`；经 arXiv / OpenAlex 开放获取解析 PDF，入库（rating=0）并自动建边 |
-| POST | `/api/papers/{id}/download-all-refs` | 一键下载全部未入库引用：Body `{"dir": "out|in|both"}`（默认 both）；响应含 `downloaded / skipped / failed` 汇总 |
-| GET | `/api/papers/{id}/fetch-progress` | 查询该论文最近一次/进行中的抓取进度 |
+| POST | `/api/papers/{id}/download-all-refs` | 自适应并行下载全部未入库引用：Body `{"dir": "out|in|both"}`（默认 both）；初始并发 3，按网络状况在 1–6 调整；单项失败不阻塞其他任务；响应含 `downloaded / skipped / failed` 汇总 |
+| GET | `/api/papers/{id}/fetch-progress` | 查询该论文最近一次/进行中的抓取或下载进度 |
+| POST | `/api/papers/{id}/fetch-refs` | 组合抓取（引用 + 被引）；响应含 `references` 与 `citations` 两个子结果 |
+| POST | `/api/papers/{id}/auto-match` | 离线解析参考文献段落，与库内论文模糊匹配建边 |
 
 **进度对象**（`fetch-progress` 返回值；GUI 内同名事件实时推送）：
 
 ```jsonc
 {
-  "stage": "references",      // references=抓取引用 | citations=抓取被引
-  "current": 23,              // 已处理条数
+  "stage": "references",      // references=抓取引用 | citations=抓取被引 | download=下载
+  "current": 23,              // 已处理条数（成功与失败均计入）
   "total": 88,                // 总条数（0 表示总量未知，如定位阶段）
+  "active": 3,                // 可选：正在执行的并行任务数
+  "pending": 62,              // 可选：等待执行的任务数
+  "concurrency": 3,           // 可选：当前自适应并发（1–6）
+  "failed": 1,                // 可选：已失败任务数
   "currentItem": "正在解析的参考文献原文/被引论文标题",
   "note": "解析中 | CrossRef (DOI) | arXiv | OpenAlex 检索 | 命中库内标题 | …",
   "at": 1759900000000
 }
 ```
 
-> Semantic Scholar 未认证限流约 1 req/s，应用已内置串行节流与 429 指数退避；
+> 下载调度器按成功、延迟、超时与 429 调整并发，并遵守 `Retry-After`；相同 URL／引用 key 去重。
+> 新论文下载入库后自动后台抓取引用与被引，但不会递归下载新发现的参考文献。
+> Semantic Scholar 未认证限流约 1 req/s，仍使用独立串行节流与 429 指数退避；
 > 如需更高配额，设置环境变量 `PAPERWEAVE_S2_API_KEY=<你的 S2 API Key>` 后启动应用。
-> 抓取"引用"（参考文献）不依赖 Semantic Scholar：解析 PDF 参考文献段落后，
-> 逐条经 DOI（CrossRef）/ arXiv 编号（arXiv API）/ 标题（OpenAlex 检索）在线确认。| POST | `/api/papers/{id}/fetch-refs` | 组合抓取（引用 + 被引）；响应含 `references` 与 `citations` 两个子结果 |
-| POST | `/api/papers/{id}/auto-match` | 离线解析参考文献段落，与库内论文模糊匹配建边 |
 
 ### 3.7 图谱快照
 
@@ -343,6 +348,7 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/graph
 | 4 | 0.8.0 | **多论文库**：新增 `GET/POST /api/libraries`、`POST /api/libraries/current`、`DELETE /api/libraries/{id}`；论文本体全局统一存储（唯一 id 跨库复用），论文库只持有 paperIds 与库内引用边；导入去重升级：hash 命中直接复用，疑似重复（DOI 相同/标题高度相似）按 `conflictPolicy`（auto/merge/new）处理，GUI 弹窗确认；`status` 响应新增 `library`/`libraries`；MCP 增至 23 个工具 |
 | 4（HTTP 不变） | 0.9.0 | 论文库新增 `desc`（简介）与 `pinned`（置顶）字段；新增 `PATCH /api/libraries/{id}` 与 `POST /api/libraries/reorder`；GUI：论文库列表改为左侧可展开/缩回的卡片面板（编辑/置顶/拖拽排序/输名删除）；「导入文件」与「链接导入」合并为统一导入弹窗（链接 + 拖文件 + 选文件）；默认初始论文库名称改为 `New Graph`；MCP 增至 25 个工具 |
 | 5 | 1.0.0 | **品牌更名 PaperGraph → PaperWeave**：鉴权头改为 `X-PaperWeave-Token`，环境变量 `PAPERWEAVE_S2_API_KEY`，MCP Server 更名 `paperweave-mcp.js`（工具前缀 `paperweave_`），数据目录 `paperweave-data`（首次启动自动从旧 `papergraph-data` 迁移）；默认初始论文库名改为 `New Weave`；GUI：新增相似论文区（文献耦合 × 同被引 Top 5）与「库外发现」面板（经典先驱 / 衍生新作聚合推荐，一键下载入库）；新品牌 Logo 全面实装 |
+| 6 | 1.2.0 | 多链接导入与 `download-all-refs` 改为自适应并行（初始 3、范围 1–6，按网络反馈与 429 调整）；进度对象新增可选 `active / pending / concurrency / failed`；并发导入增加哈希复核；PDF 参考文献提取修复扩窗页序，支持无编号条目、机构作者和附录截断，旧论文抓取时可从本地 PDF 按需重建；阅读器与 3D 节点侧栏同步显示抓取／下载进度 |
 
 > **维护者注意**：新增/修改接口或数据字段时，必须同步更新本文件并递增 API 版本号；
 > 本文件位于源码仓库 `agents/AGENTS.md`，打包时随应用分发（安装版在 `resources/AGENTS.md`，
