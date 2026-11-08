@@ -84,11 +84,29 @@ async function pairConnector() {
     await chrome.storage.local.set({ serverUrl: found.serverUrl, token: data.data.token });
     return ping();
   } catch (e) {
-    return { ...found, authed: false, needsPair: true, error: e.name === 'TimeoutError' ? '授权等待超时，请重试' : e.message };
+    return { ...found, authed: false, needsPair: true, error: e.name === 'TimeoutError' ? '连接等待超时，请重试' : e.message };
   }
 }
 
+async function connect() {
+  const current = await ping();
+  if (current.ok && current.authed) return current;
+  if (!current.ok) return current;
+  return pairConnector();
+}
+
+async function listLibraries() {
+  const connected = await connect();
+  if (!connected.ok || !connected.authed) return { ok: false, error: connected.error || '无法连接 PaperWeave' };
+  const { status, data } = await apiFetch('/api/libraries');
+  if (status === 401) return { ok: false, error: '连接已失效，请重试' };
+  if (!data.ok) return { ok: false, error: data.error || ('HTTP ' + status) };
+  return { ok: true, current: data.data.current, libraries: data.data.libraries || [] };
+}
+
 async function importPaper(meta) {
+  const connected = await connect();
+  if (!connected.ok || !connected.authed) return { ok: false, error: connected.error || '无法连接 PaperWeave' };
   const payload = {
     url: meta.url,
     pdfUrl: meta.pdfUrl || undefined,
@@ -98,9 +116,10 @@ async function importPaper(meta) {
     doi: meta.doi || undefined,
     abstract: meta.abstract || undefined,
     venue: meta.venue || undefined,
+    libraryId: meta.libraryId || undefined,
   };
   const { status, data } = await apiFetch('/api/papers/import-web', { method: 'POST', body: payload });
-  if (status === 401) return { ok: false, error: '连接已失效，请重新授权 PaperWeave Connector' };
+  if (status === 401) return { ok: false, error: '连接已失效，请重试' };
   if (!data.ok) return { ok: false, error: data.error || ('HTTP ' + status) };
   return { ok: true, paper: data.data && data.data.paper, duplicate: !!(data.data && data.data.duplicate) };
 }
@@ -202,6 +221,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     try {
       if (msg.type === 'pw:ping') return sendResponse(await ping());
       if (msg.type === 'pw:discover') return sendResponse(await discover());
+      if (msg.type === 'pw:connect') return sendResponse(await connect());
+      if (msg.type === 'pw:libraries') return sendResponse(await listLibraries());
       if (msg.type === 'pw:pair') return sendResponse(await pairConnector());
       if (msg.type === 'pw:import') return sendResponse(await importPaper(msg.meta || {}));
       if (msg.type === 'pw:arxivMeta') return sendResponse(await arxivMetaFromAbs(msg.absUrl));

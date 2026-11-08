@@ -6,7 +6,7 @@
 
 - 应用：PaperWeave（跨平台论文阅读器，Windows / macOS / Linux）
 - 接口形式：本地 HTTP JSON API（`127.0.0.1`，仅本机回环）+ MCP stdio Server（`paperweave-mcp.js`）
-- API 版本：`7`（自 PaperWeave 1.2.0 起；鉴权头 `X-PaperWeave-Token`，浏览器插件支持一次性配对授权）
+- API 版本：`8`（自 PaperWeave 1.3.0 起；鉴权头 `X-PaperWeave-Token`，浏览器插件自动配对并支持目标论文库导入）
 
 > **0.8.0 多论文库架构**：论文本体全局统一存储（每篇论文唯一 id，PDF 内容哈希命名共享一份文件），
 > 论文库（library）只记录「包含哪些论文 id + 库内引用关联」。批注 / 笔记 / 评星随论文全局保存。
@@ -119,7 +119,7 @@ X-PaperWeave-Token: <agent-api.json 中的 token>
 
 令牌在同一论文库生命周期内保持稳定；删除数据目录会重新生成。
 
-PaperWeave Connector 无需用户手动复制令牌：插件自动扫描 `127.0.0.1:24680–24700`，通过 `/api/ping` 发现桌面端，再发起配对。配对仅接受 `chrome-extension://` / `moz-extension://` 来源，桌面端弹窗明确批准后才返回令牌；普通网页来源会被拒绝，令牌由插件保存在本地。
+PaperWeave Connector 无需用户手动复制令牌或确认授权：插件自动扫描 `127.0.0.1:24680–24700`，通过 `/api/ping` 发现桌面端并自动完成配对。配对仅接受 `chrome-extension://` / `moz-extension://` 来源，普通网页来源会被拒绝；令牌由插件保存在本地，打开弹窗或保存论文时会自动检测并连接。
 
 ### 1.3 约定
 
@@ -315,8 +315,8 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/graph
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/connector/pair` | 扩展来源配对请求；Body 可含 `client` / `extensionId`。桌面端批准后返回 `{ ok:true, data:{ token } }`，拒绝返回 403，同时已有请求等待确认时返回 409 |
-| POST | `/api/papers/import-web` | 需令牌；接收 `url` / `pdfUrl` 及 `title` / `authors` / `year` / `doi` / `abstract` / `venue` 元数据提示，下载 PDF 入库并自动建立引用 |
+| POST | `/api/connector/pair` | 扩展来源配对请求；Body 可含 `client` / `extensionId`。自动返回 `{ ok:true, data:{ token } }`，无需桌面端确认；普通网页返回 403，同时已有请求处理中时返回 409 |
+| POST | `/api/papers/import-web` | 需令牌；接收 `url` / `pdfUrl` 及 `title` / `authors` / `year` / `doi` / `abstract` / `venue` 元数据提示，可选 `libraryId` 指定目标论文库，下载 PDF 入库并自动建立引用 |
 
 ---
 
@@ -362,6 +362,7 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/graph
 | 6（HTTP 不变） | 1.2.0 | GUI：时间线重新设计为二维研究发展史视图，固定字号 HTML 年份标尺随相机定位并禁止三维旋转；论文详情新增完整上下游发展史，递归展示参考文献与被引脉络、排除旁支并支持一键恢复完整图谱 |
 | 7 | 1.2.0 | 浏览器插件新增 `POST /api/connector/pair`：自动发现本地桌面端，扩展来源经桌面端一次性授权后获取令牌，无需手动配置 API Key；普通网页配对请求被拒绝；GUI 年份标尺与时间线节点避让详情栏，批量与导入按钮归入各论文库工具栏 |
 | 7（HTTP 不变） | 1.2.0 | GUI：全部下拉菜单统一圆角、自定义箭头与焦点样式；时间线普通滚轮整体缩放，Shift+滚轮横向缩放，Ctrl+滚轮纵向缩放；论文标签固定 24px，采用长标题截断、上下交错与优先级碰撞检测避免重叠 |
+| 8 | 1.3.0 | 浏览器插件改为自动静默配对，无需点击连接或桌面端同意；弹窗立即显示连接与识别进度，新增论文库列表和目标库选择；`import-web` 新增可选 `libraryId`，保存时自动连接并记住目标库 |
 
 > **维护者注意**：新增/修改接口或数据字段时，必须同步更新本文件并递增 API 版本号；
 > 本文件位于源码仓库 `agents/AGENTS.md`，打包时随应用分发（安装版在 `resources/AGENTS.md`，

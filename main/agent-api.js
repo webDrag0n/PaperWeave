@@ -55,7 +55,7 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
 
     // 公共探活
     if (u.pathname === '/api/ping') {
-      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 7 });
+      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 8 });
     }
 
     // 浏览器插件配对：仅扩展来源可发起，必须由桌面端明确批准。
@@ -168,8 +168,10 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
         const body = JSON.parse((await readBody(req)).toString('utf-8') || '{}');
         const target = body.pdfUrl || body.url;
         if (!target) return json(res, 400, { ok: false, error: '需要 url 或 pdfUrl 字段' });
+        if (body.libraryId && !store.getLibrary(body.libraryId)) return json(res, 400, { ok: false, error: '目标论文库不存在' });
         try {
           const opts = { conflictPolicy: body.conflictPolicy || 'auto' };
+          if (body.libraryId) opts.libraryId = body.libraryId;
           if (typeof body.rating === 'number') opts.rating = body.rating;
           const r = await service.importFromUrl(target, opts);
           const paper = r && r.paper ? store.getPaper(r.paper.id) : null;

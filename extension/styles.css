@@ -102,3 +102,25 @@ button { font-family: inherit; }
   background: var(--bg2); font-size: 12px; color: var(--text-dim); line-height: 1.8;
 }
 .help code { color: var(--accent); user-select: all; }
+
+
+/* 即时加载与目标论文库选择 */
+.loading-head { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 12px 0; }
+.loading-head h2 { font-size: 14px; font-weight: 600; }
+.spinner {
+  width: 20px; height: 20px; border: 2px solid var(--line); border-top-color: var(--accent);
+  border-radius: 50%; animation: pw-spin .75s linear infinite;
+}
+@keyframes pw-spin { to { transform: rotate(360deg); } }
+.loading-stage { margin: 8px 0 10px; color: var(--text-dim); font-size: 12px; text-align: center; }
+.progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--bg3); }
+.progress-fill { height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s ease; }
+.loading-log { margin: 12px 0 0 18px; color: var(--text-dim); font-size: 11px; line-height: 1.7; }
+.library-picker { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; color: var(--text-dim); font-size: 12px; }
+.library-picker select {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg3); color: var(--text); font-size: 13px; outline: none;
+}
+.library-picker select:focus { border-color: var(--accent); }
+#errorView .btn { display: block; margin: 12px auto 6px; }
+#errorView .link-btn { display: block; margin: 8px auto; }

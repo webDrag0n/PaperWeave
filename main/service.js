@@ -70,12 +70,13 @@ function createService(store, opts = {}) {
   // opts.rating：手动导入/下载默认 1 星；引用文献批量下载默认 0（未评分）
   // opts.conflictPolicy：'ask'(GUI 默认，弹窗确认) | 'auto'(Agent 默认：DOI 冲突自动复用) | 'merge' | 'new'
   async function importOnePdfBuffer(buf, nameHint, opts = {}) {
+    const targetLibraryId = opts.libraryId || store.currentLibraryId();
     const { fileName, hash } = bufferIntoLibrary(store.libraryDir, buf, nameHint);
     // 1) 内容 hash 命中全局注册表 → 复用同一论文 id，不重复存储
     const byHash = store.findByHash(hash);
     if (byHash) {
-      const inCurrent = store.paperInLibraries(byHash.id).includes(store.currentLibraryId());
-      if (!inCurrent) store.addToLibrary(byHash.id);
+      const inCurrent = store.paperInLibraries(byHash.id).includes(targetLibraryId);
+      if (!inCurrent) store.addToLibrary(byHash.id, targetLibraryId);
       return { paper: pub(byHash), duplicate: inCurrent, reused: !inCurrent };
     }
     // 2) 提取元数据
@@ -90,8 +91,8 @@ function createService(store, opts = {}) {
     // 并行任务可能在等待 PDF 提取期间注册了相同内容，入库前必须再次复核。
     const concurrentHash = store.findByHash(hash);
     if (concurrentHash) {
-      const inCurrent = store.paperInLibraries(concurrentHash.id).includes(store.currentLibraryId());
-      if (!inCurrent) store.addToLibrary(concurrentHash.id);
+      const inCurrent = store.paperInLibraries(concurrentHash.id).includes(targetLibraryId);
+      if (!inCurrent) store.addToLibrary(concurrentHash.id, targetLibraryId);
       return { paper: pub(concurrentHash), duplicate: inCurrent, reused: !inCurrent };
     }
     // 3) 疑似重复冲突：DOI 相同（不同版本）或标题高度相似
@@ -104,7 +105,7 @@ function createService(store, opts = {}) {
       }
       if (policy === 'merge' || (policy === 'auto' && conflicts[0].reason === 'doi')) {
         const target = store.getPaper(conflicts[0].paper.id);
-        store.addToLibrary(target.id);
+        store.addToLibrary(target.id, targetLibraryId);
         return { paper: pub(target), duplicate: false, reused: true, merged: true };
       }
       // policy 'new' / auto 但仅标题相似 → 作为新论文
@@ -131,7 +132,7 @@ function createService(store, opts = {}) {
       addedAt: Date.now(),
       updatedAt: Date.now(),
     };
-    store.addPaper(paper);
+    store.addPaper(paper, targetLibraryId);
     // 新论文入库后立即后台自动解析引用关系（静默，失败不影响导入）
     scheduleAutoFetch(paper.id, progressFor(paper.id));
     return { paper: pub(paper), duplicate: false };

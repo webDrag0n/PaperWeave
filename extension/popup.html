@@ -13,12 +13,24 @@
   </header>
 
   <main>
-    <!-- 自动发现与一键授权 -->
-    <section id="setupView" class="hidden">
+    <!-- 默认立即可见：后台发现、连接、读取论文库和识别论文的进度 -->
+    <section id="loadingView">
+      <div class="loading-head">
+        <span class="spinner" aria-hidden="true"></span>
+        <h2 id="loadingTitle">正在准备 PaperWeave</h2>
+      </div>
+      <p id="loadingStage" class="loading-stage">正在读取当前页面…</p>
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="5">
+        <div id="loadingBar" class="progress-fill" style="width:5%"></div>
+      </div>
+      <ol id="loadingLog" class="loading-log"></ol>
+    </section>
+
+    <!-- 连接或识别失败 -->
+    <section id="errorView" class="hidden">
       <div class="empty-icon">🧩</div>
-      <p id="setupText" class="empty-text" data-zh="正在检测本地 PaperWeave…" data-en="Detecting PaperWeave…">正在检测本地 PaperWeave…</p>
-      <p class="empty-sub" data-zh="无需填写 API Key。首次连接时，请在桌面端允许一次授权。" data-en="No API key required. Approve the first connection in the desktop app.">无需填写 API Key。首次连接时，请在桌面端允许一次授权。</p>
-      <button id="pairBtn" class="btn btn-primary" data-zh="连接 PaperWeave" data-en="Connect PaperWeave">连接 PaperWeave</button>
+      <p id="errorText" class="empty-text">暂时无法连接 PaperWeave</p>
+      <button id="retryBtn" class="btn btn-primary" data-zh="重试" data-en="Retry">重试</button>
       <button id="openOptions1" class="link-btn" data-zh="高级连接设置" data-en="Advanced connection settings">高级连接设置</button>
     </section>
 
@@ -30,6 +42,10 @@
         <p id="paperAuthors" class="paper-authors"></p>
         <p id="paperMeta" class="paper-meta"></p>
       </div>
+      <label class="library-picker" for="librarySelect">
+        <span data-zh="保存到论文库" data-en="Save to library">保存到论文库</span>
+        <select id="librarySelect"></select>
+      </label>
       <button id="saveBtn" class="btn btn-primary btn-save" data-zh="📥 保存到 PaperWeave" data-en="📥 Save to PaperWeave">📥 保存到 PaperWeave</button>
       <div id="resultBox" class="result hidden"></div>
     </section>

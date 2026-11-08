@@ -2,11 +2,13 @@
 const { startAgentApi } = require('../main/agent-api');
 
 const papers = [];
+let lastImportOpts = null;
 const store = {
   data: { papers, links: [], annotations: {} },
   libraryDir: '/tmp/lib',
   currentLibraryId: () => 'lib_default',
-  listLibraries: () => [{ id: 'lib_default' }],
+  listLibraries: () => [{ id: 'lib_default' }, { id: 'lib_review' }],
+  getLibrary: (id) => ['lib_default', 'lib_review'].includes(id) ? { id } : null,
   listPapers: () => papers,
   listLinks: () => [],
   getPaper: (id) => papers.find(p => p.id === id) || null,
@@ -20,6 +22,7 @@ const store = {
 
 const service = {
   async importFromUrl(url, opts) {
+    lastImportOpts = opts;
     // 模拟：PDF 提取到的标题为空 → 由 import-web 的元数据提示补齐
     const paper = {
       id: 'p_test1', title: '未命名论文', authors: [], year: '', doi: '',
@@ -46,7 +49,7 @@ const service = {
   // 1. ping 无需鉴权 + CORS 头
   let res = await fetch(base + '/api/ping');
   let body = await res.json();
-  check('ping ok', body.ok && body.api === 7);
+  check('ping ok', body.ok && body.api === 8);
   check('ping CORS header', res.headers.get('access-control-allow-origin') === '*');
 
   // 2. OPTIONS 预检
@@ -96,10 +99,12 @@ const service = {
       title: 'Attention Is All You Need',
       authors: ['Ashish Vaswani', 'Noam Shazeer'],
       year: '2017', doi: '10.48550/arXiv.1706.03762', abstract: 'The dominant sequence transduction models...', venue: 'arXiv',
+      libraryId: 'lib_review',
     }),
   });
   body = await res.json();
   check('导入 ok', res.status === 200 && body.ok === true);
+  check('导入传递目标论文库', lastImportOpts && lastImportOpts.libraryId === 'lib_review');
   check('返回 paper', !!(body.data && body.data.paper && body.data.paper.id === 'p_test1'));
   check('元数据补齐标题', papers[0].title === 'Attention Is All You Need');
   check('元数据补齐作者/年份/DOI/摘要/venue', papers[0].authors.length === 2 && papers[0].year === '2017' && papers[0].doi.startsWith('10.') && papers[0].abstract.length > 10 && papers[0].venue === 'arXiv');
