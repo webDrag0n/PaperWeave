@@ -73,7 +73,7 @@ async function main() {
     // 探活与鉴权
     const ping = await req(base, 'GET', '/api/ping');
     check('ping 无需令牌', ping.status === 200 && ping.json.ok);
-    check('API 版本 6（自适应并行下载）', ping.json.api === 6, 'api=' + ping.json.api);
+    check('API 版本 8（插件静默连接与目标库导入）', ping.json.api === 8, 'api=' + ping.json.api);
     const noAuth = await req(base, 'GET', '/api/papers');
     check('无令牌被拒绝 401', noAuth.status === 401);
     const badAuth = await req(base, 'GET', '/api/papers', null, 'wrong-token');

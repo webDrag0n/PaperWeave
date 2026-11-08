@@ -22,6 +22,12 @@ export async function runSelftest(ctx) {
     check('论文库列表为 6 篇', state.papers.length === 6, 'count=' + state.papers.length);
     renderLibrary();
     await sleep(400);
+    check('批量与导入归属论文库工具栏', document.querySelector('#btnBulkMode').parentElement.id === 'libraryToolbar' && document.querySelector('#btnImport').parentElement.id === 'libraryToolbar');
+    check('顶栏不再显示库级批量导入', !document.querySelector('.top-actions').contains(document.querySelector('#btnBulkMode')) && !document.querySelector('.top-actions').contains(document.querySelector('#btnImport')));
+    check('全部下拉菜单统一圆角与自定义箭头', [...document.querySelectorAll('select')].every(el => {
+      const style = getComputedStyle(el);
+      return parseFloat(style.borderTopLeftRadius) >= 8 && style.appearance === 'none' && style.backgroundImage.includes('data:image/svg+xml');
+    }));
     await bridge.selftestShot('01-library');
 
     // ---------- 2. 元数据提取 ----------
@@ -468,6 +474,141 @@ export async function runSelftest(ctx) {
     await bridge.selftestShot('04-graph');
     check('3D 图谱构建', graph && graph.nodes.length === 6, 'nodes=' + (graph && graph.nodes.length));
     check('图谱边数量与链接一致', graph && graph.edges.length === state.links.length, `edges=${graph && graph.edges.length} links=${state.links.length}`);
+
+    // ---------- 9.0 网络 / 时间线布局切换 ----------
+    const timelineBtn = document.querySelector('[data-graph-mode="timeline"]');
+    const networkBtn = document.querySelector('[data-graph-mode="network"]');
+    check('图谱布局切换按钮存在', !!timelineBtn && !!networkBtn);
+    if (timelineBtn && networkBtn) {
+      graph.select(attention.id);
+      timelineBtn.click();
+      await sleep(350);
+      check('时间线模式已激活', graph.viewMode === 'timeline' && timelineBtn.getAttribute('aria-pressed') === 'true');
+      check('时间线节点共面且按年份升序', graph.nodes.every(n => Math.abs(n.pos.z) < 1e-6) && graph.timelineColumns.every((c, i, a) => i === 0 || (a[i - 1].year !== null && (c.year === null || a[i - 1].year <= c.year))));
+      check('同年节点纵向避让', graph.nodes.every((a, i) => graph.nodes.every((b, j) => i === j || String(a.paper.year) !== String(b.paper.year) || Math.abs(a.pos.y - b.pos.y) >= 18)));
+      const yearRuler = document.querySelector('#graphTimelineRuler');
+      check('年份参考线与固定字号标尺已创建', graph.timelineColumns.length > 0 && graph.timelineGroup.children.length === graph.timelineColumns.length && yearRuler && yearRuler.children.length === graph.timelineColumns.length && getComputedStyle(yearRuler.children[0]).fontSize === '14px');
+      check('时间线禁止三维旋转', graph.controls.enableRotate === false);
+      check('时间线操作提示使用二维平移', document.querySelector('#graphLegend .legend-tip').textContent.includes('拖动平移'));
+      check('切换布局保留选中状态', graph.selectedIds.includes(attention.id));
+      const timelineControls = document.querySelector('#graphTimelineCtl');
+      const yearSelect = document.querySelector('#graphYearSelect');
+      check('时间线导航与缩放控件存在', !!timelineControls && !!yearSelect);
+      if (timelineControls && yearSelect) {
+        check('时间线工具条显示且年份选项完整', !timelineControls.classList.contains('hidden') && yearSelect.options.length === graph.timelineColumns.length, 'options=' + yearSelect.options.length);
+        const lastIndex = graph.timelineColumns.length - 1;
+        yearSelect.value = graph.timelineColumns[lastIndex].key;
+        yearSelect.dispatchEvent(new Event('change'));
+        await sleep(750);
+        check('年份下拉跳转定位相机', graph.activeTimelineKey === graph.timelineColumns[lastIndex].key && Math.abs(graph.controls.target.x - graph.timelineColumns[lastIndex].x) < 0.01);
+        document.querySelector('#graphPrevYear').click();
+        await sleep(750);
+        check('上一年按钮跳转', graph.activeTimelineKey === graph.timelineColumns[lastIndex - 1].key);
+        document.querySelector('#graphNextYear').click();
+        await sleep(750);
+        check('下一年按钮返回', graph.activeTimelineKey === graph.timelineColumns[lastIndex].key);
+        const distanceBeforeZoom = graph.camera.position.distanceTo(graph.controls.target);
+        document.querySelector('#graphZoomIn').click();
+        await sleep(350);
+        const distanceAfterZoomIn = graph.camera.position.distanceTo(graph.controls.target);
+        check('时间线放大缩短相机距离', distanceAfterZoomIn < distanceBeforeZoom, `${distanceBeforeZoom.toFixed(1)}→${distanceAfterZoomIn.toFixed(1)}`);
+        document.querySelector('#graphZoomOut').click();
+        await sleep(350);
+        check('时间线缩小恢复相机距离', Math.abs(graph.camera.position.distanceTo(graph.controls.target) - distanceBeforeZoom) < 0.1);
+        document.querySelector('#graphZoomFit').click();
+        await sleep(750);
+        check('适配全图保持当前年份', graph.activeTimelineKey === graph.timelineColumns[lastIndex].key);
+      }
+      const graphCanvas = graph.renderer.domElement;
+      const labelNode = graph.nodes[0];
+      const labelPixels = () => {
+        const distance = graph.camera.position.distanceTo(labelNode.label.position);
+        return labelNode.label.scale.y * graphCanvas.clientHeight / (2 * distance * Math.tan(graph.camera.fov * Math.PI / 360));
+      };
+      const normalLabelSize = labelPixels();
+      check('时间线节点标签为 24px', Math.abs(normalLabelSize - 24) < 0.2, normalLabelSize.toFixed(2));
+      const visibleLabelRects = () => graph.nodes.filter(n => n.label.visible).map(n => {
+        const p = n.label.position.clone().project(graph.camera);
+        return { x: (p.x * 0.5 + 0.5) * graphCanvas.clientWidth, y: (-p.y * 0.5 + 0.5) * graphCanvas.clientHeight, w: 24 * n.label.userData.aspect + 4, h: 28 };
+      });
+      const labelRects = visibleLabelRects();
+      let labelOverlaps = 0;
+      for (let i = 0; i < labelRects.length; i++) for (let j = i + 1; j < labelRects.length; j++) {
+        const a = labelRects[i], b = labelRects[j];
+        if (Math.abs(a.x - b.x) < (a.w + b.w) / 2 && Math.abs(a.y - b.y) < (a.h + b.h) / 2) labelOverlaps++;
+      }
+      check('放大节点标签无重叠', labelOverlaps === 0, 'overlaps=' + labelOverlaps);
+      const hiddenLabel = graph.nodes.find(n => !n.label.visible);
+      if (hiddenLabel) {
+        graph.hoverId = hiddenLabel.id;
+        await sleep(120);
+        check('悬停优先显示被隐藏标签', hiddenLabel.label.visible);
+        graph.hoverId = null;
+      }
+      const normalDistance = graph.camera.position.distanceTo(graph.controls.target);
+      graphCanvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
+      await sleep(500);
+      check('普通滚轮执行整体缩放', Math.abs(graph.camera.position.distanceTo(graph.controls.target) - normalDistance) > 0.1);
+      check('普通滚轮论文标签字号不变', Math.abs(labelPixels() - normalLabelSize) < 0.2, `${normalLabelSize.toFixed(2)}→${labelPixels().toFixed(2)}`);
+      const axisNode = graph.nodes.find(n => Math.abs(n.pos.x) > 1);
+      const axisGuide = graph.timelineGroup.children[0];
+      const beforeAxisX = Math.abs(axisNode.pos.x);
+      const beforeAxisY = axisGuide.geometry.attributes.position.getY(1);
+      const beforeAxisDistance = graph.camera.position.distanceTo(graph.controls.target);
+      const beforeAxisLabelSize = labelPixels();
+      graphCanvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, shiftKey: true, bubbles: true, cancelable: true }));
+      await sleep(300);
+      check('Shift 滚轮只横向缩放', Math.abs(axisNode.pos.x) > beforeAxisX && Math.abs(axisGuide.geometry.attributes.position.getY(1) - beforeAxisY) < 1e-6 && Math.abs(graph.camera.position.distanceTo(graph.controls.target) - beforeAxisDistance) < 0.01);
+      check('横向缩放论文标签字号不变', Math.abs(labelPixels() - beforeAxisLabelSize) < 0.2);
+      const beforeCtrlX = axisNode.pos.x;
+      graphCanvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, ctrlKey: true, bubbles: true, cancelable: true }));
+      await sleep(300);
+      check('Ctrl 滚轮只纵向缩放', axisGuide.geometry.attributes.position.getY(1) > beforeAxisY && Math.abs(axisNode.pos.x - beforeCtrlX) < 1e-6 && Math.abs(graph.camera.position.distanceTo(graph.controls.target) - beforeAxisDistance) < 0.01);
+      check('纵向缩放论文标签字号不变', Math.abs(labelPixels() - beforeAxisLabelSize) < 0.2);
+      graph.fitView();
+      await sleep(750);
+      const lineageBtn = document.querySelector('#graphSideLineage');
+      check('单篇论文发展史入口存在', !!lineageBtn);
+      if (lineageBtn) {
+        graph.opts.onSelect(attention.id, [attention.id]);
+        await sleep(60);
+        const rulerBounds = document.querySelector('#graphTimelineRuler').getBoundingClientRect();
+        const sideBounds = document.querySelector('#graphSide').getBoundingClientRect();
+        check('年份标尺避让论文详情栏', rulerBounds.right <= sideBounds.left - 10, `rulerRight=${rulerBounds.right} sideLeft=${sideBounds.left}`);
+        graph.fitView();
+        await sleep(750);
+        const maxNodeScreenX = Math.max(...graph.nodes.map(n => (n.pos.clone().project(graph.camera).x * 0.5 + 0.5) * graph.renderer.domElement.clientWidth));
+        check('时间线节点适配时避让详情栏', maxNodeScreenX <= sideBounds.left - 8, `nodeRight=${maxNodeScreenX.toFixed(1)} sideLeft=${sideBounds.left}`);
+        lineageBtn.click();
+        await sleep(500);
+        const expectedIds = new Set([attention.id]);
+        for (const direction of ['upstream', 'downstream']) {
+          const queue = [attention.id];
+          while (queue.length) {
+            const current = queue.shift();
+            for (const link of state.links) {
+              const matches = direction === 'upstream' ? link.from === current : link.to === current;
+              const next = direction === 'upstream' ? link.to : link.from;
+              if (matches && !expectedIds.has(next)) { expectedIds.add(next); queue.push(next); }
+            }
+          }
+        }
+        check('发展史仅保留完整上下游节点', graph.viewMode === 'timeline' && graph.nodes.length === expectedIds.size && graph.nodes.every(n => expectedIds.has(n.id)), `nodes=${graph.nodes.length} expected=${expectedIds.size}`);
+        check('发展史保留中心论文选中', state.graphLineageId === attention.id && graph.selectedIds.includes(attention.id));
+        const lineageBar = document.querySelector('#graphLineageBar');
+        check('发展史标题与上下游计数可见', lineageBar && !lineageBar.classList.contains('hidden') && lineageBar.textContent.includes('上游') && lineageBar.textContent.includes('下游'));
+        await bridge.selftestShot('04-graph-lineage');
+        document.querySelector('#graphLineageClear').click();
+        await sleep(500);
+        check('退出发展史恢复完整图谱', state.graphLineageId === null && graph.nodes.length === state.papers.length && lineageBar.classList.contains('hidden'));
+      }
+      await bridge.selftestShot('04-graph-timeline');
+      networkBtn.click();
+      await sleep(350);
+      check('切回网络模式并恢复三维布局', graph.viewMode === 'network' && graph.controls.enableRotate === true && graph.timelineGroup.children.length === 0 && graph.nodes.some(n => Math.abs(n.pos.z) > 0.01));
+      check('切回网络仍保留选中状态', graph.selectedIds.includes(attention.id));
+      graph.select(null);
+    }
 
     // 选中 Attention（默认 2 跳）：BERT/ViT/S2S/GPT 均 1 跳蓝色；ResNet 2 跳橙色
     const s2s = state.papers.find(p => /Sequence to Sequence/i.test(p.title || ''));

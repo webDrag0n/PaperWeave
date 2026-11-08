@@ -51,6 +51,17 @@ body {
 #app { display: flex; flex-direction: column; }
 .hidden { display: none !important; }
 button { font-family: inherit; }
+select {
+  appearance: none; -webkit-appearance: none;
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 30px 5px 10px;
+  background-color: var(--bg3); color: var(--text); font: inherit; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%239aa0ae' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 12px;
+}
+select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+select:disabled { opacity: .55; cursor: default; }
+select option { background: var(--bg3); color: var(--text); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ---------- 顶栏 ---------- */
@@ -115,8 +126,8 @@ button { font-family: inherit; }
 .library-stats:empty { display: none; }
 .sort-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
 .sort-label select {
-  padding: 5px 9px; border-radius: 7px; border: 1px solid var(--line);
-  background: var(--bg3); color: var(--text); font-size: 12px; outline: none; cursor: pointer;
+  padding: 5px 30px 5px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background-color: var(--bg3); color: var(--text); font-size: 12px; outline: none; cursor: pointer;
 }
 .sort-label select:focus { border-color: var(--accent); }
 
@@ -366,6 +377,59 @@ button { font-family: inherit; }
   backdrop-filter: blur(6px);
 }
 .graph-back:hover { border-color: var(--accent); color: var(--accent); }
+.graph-mode-switch {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 12;
+  display: flex; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 9px;
+  background: color-mix(in srgb, var(--bg2) 86%, transparent); backdrop-filter: blur(6px);
+}
+.graph-mode-switch button {
+  border: 0; border-radius: 6px; padding: 5px 12px; cursor: pointer;
+  background: transparent; color: var(--text-dim); font-size: 12px;
+}
+.graph-mode-switch button:hover { color: var(--text); background: var(--bg-hover); }
+.graph-mode-switch button.active { background: var(--accent); color: #0d1420; }
+::root[data-theme="light"] .graph-mode-switch button.active { color: #fff; }
+@media (max-width: 760px) {
+  .graph-mode-switch { left: auto; right: 14px; transform: none; }
+  .graph-filter { top: 58px; left: 14px; }
+  #graphLegend { top: 100px; }
+}
+.graph-timeline-ruler {
+  position: absolute; top: 58px; left: 14px; right: 14px; height: 38px; z-index: 10;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: color-mix(in srgb, var(--bg2) 92%, transparent); backdrop-filter: blur(8px);
+  transition: top .2s ease;
+}
+.graph-timeline-ruler button {
+  position: absolute; top: 5px; transform: translateX(-50%); min-width: 52px;
+  padding: 3px 8px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--text); font-size: 14px; font-weight: 700; line-height: 20px; cursor: pointer;
+  white-space: nowrap;
+}
+.graph-timeline-ruler button::after {
+  content: ''; position: absolute; left: 50%; bottom: -6px; width: 1px; height: 5px;
+  background: var(--text-dim);
+}
+.graph-timeline-ruler button:hover { background: var(--bg-hover); color: var(--accent); }
+.graph-timeline-ruler button.active { background: var(--accent); color: #0d1420; }
+::root[data-theme="light"] .graph-timeline-ruler button.active { color: #fff; }
+.graph-lineage-bar {
+  position: absolute; top: 58px; left: 50%; transform: translateX(-50%); z-index: 13;
+  display: flex; align-items: center; gap: 12px; max-width: min(720px, calc(100% - 32px));
+  padding: 7px 10px 7px 14px; border: 1px solid var(--accent); border-radius: 9px;
+  background: color-mix(in srgb, var(--bg2) 94%, transparent); color: var(--text);
+  font-size: 12px; backdrop-filter: blur(8px);
+}
+#graphLineageText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.graph-lineage-bar button {
+  flex: none; border: 0; border-radius: 6px; padding: 4px 9px; cursor: pointer;
+  background: var(--accent); color: #0d1420; font-size: 12px;
+}
+::root[data-theme="light"] .graph-lineage-bar button { color: #fff; }
+#graphView.lineage-active .graph-timeline-ruler { top: 102px; }
+#graphView:has(#graphSide:not(.hidden)) .graph-timeline-ruler { right: 350px; }
+#graphView.timeline-active #graphLegend { top: 106px; }
+#graphView.timeline-active.lineage-active #graphLegend { top: 150px; }
 .graph-filter {
   position: absolute; top: 14px; left: 150px; z-index: 12;
   display: flex; align-items: center; gap: 8px;
@@ -374,13 +438,34 @@ button { font-family: inherit; }
   font-size: 12px; color: var(--text-dim);
 }
 .graph-filter select {
-  padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line);
-  background: var(--bg3); color: var(--text); font-size: 12px; outline: none; cursor: pointer;
+  padding: 3px 28px 3px 9px; border-radius: 8px; border: 1px solid var(--line);
+  background-color: var(--bg3); color: var(--text); font-size: 12px; outline: none; cursor: pointer;
 }
 #graphEmpty {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   color: var(--text-dim); font-size: 14px; background: color-mix(in srgb, var(--bg2) 86%, transparent);
   border: 1px dashed var(--line); border-radius: 10px; padding: 14px 22px; z-index: 11;
+}
+.graph-timeline-ctl {
+  position: absolute; bottom: 16px; left: 14px; z-index: 12;
+  display: flex; align-items: center; gap: 5px; padding: 5px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: color-mix(in srgb, var(--bg2) 88%, transparent); backdrop-filter: blur(6px);
+}
+.graph-timeline-ctl button {
+  min-width: 30px; height: 28px; padding: 0 7px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text); cursor: pointer; font-size: 14px;
+}
+.graph-timeline-ctl button:hover:not(:disabled) { background: var(--bg-hover); color: var(--accent); }
+.graph-timeline-ctl button:disabled { opacity: .35; cursor: default; }
+.graph-timeline-ctl .timeline-fit { font-size: 12px; }
+.graph-timeline-ctl select {
+  max-width: 110px; height: 28px; padding: 0 26px 0 8px; border: 1px solid var(--line); border-radius: 8px;
+  background-color: var(--bg3); color: var(--text); font-size: 12px; outline: none;
+}
+.timeline-ctl-separator { width: 1px; height: 18px; margin: 0 3px; background: var(--line); }
+@media (max-width: 760px) {
+  .graph-timeline-ctl { bottom: 70px; max-width: calc(100% - 28px); overflow-x: auto; }
 }
 .graph-hop {
   position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 12;

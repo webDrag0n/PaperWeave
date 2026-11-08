@@ -1,14 +1,39 @@
-// PaperWeave Connector 后台服务：与本地 PaperWeave Agent API 通信
-// API 说明：POST {serverUrl}/api/papers/import-web，头 X-PaperWeave-Token 鉴权
+// PaperWeave Connector 后台服务：自动发现本地桌面端，一键配对后调用 Agent API
 
 const DEFAULT_SERVER = 'http://127.0.0.1:24680';
+const LOCAL_PORT_COUNT = 21;
 
 async function getConfig() {
-  const cfg = await chrome.storage.sync.get(['serverUrl', 'token']);
+  const local = await chrome.storage.local.get(['serverUrl', 'token']);
+  const legacy = await chrome.storage.sync.get(['serverUrl', 'token']);
   return {
-    serverUrl: (cfg.serverUrl || DEFAULT_SERVER).replace(/\/+$/, ''),
-    token: cfg.token || '',
+    serverUrl: (local.serverUrl || legacy.serverUrl || DEFAULT_SERVER).replace(/\/+$/, ''),
+    token: local.token || legacy.token || '',
   };
+}
+
+async function probe(serverUrl) {
+  try {
+    const res = await fetch(serverUrl + '/api/ping', { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return null;
+    const app = await res.json();
+    return app.ok && app.name === 'PaperWeave' ? app : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function discover() {
+  const cfg = await getConfig();
+  const candidates = [...new Set([
+    cfg.serverUrl,
+    ...Array.from({ length: LOCAL_PORT_COUNT }, (_, i) => `http://127.0.0.1:${24680 + i}`),
+  ])];
+  const results = await Promise.all(candidates.map(async serverUrl => ({ serverUrl, app: await probe(serverUrl) })));
+  const found = results.find(r => r.app);
+  if (!found) return { ok: false, error: '未发现 PaperWeave 桌面端，请先打开应用' };
+  if (found.serverUrl !== cfg.serverUrl) await chrome.storage.local.set({ serverUrl: found.serverUrl });
+  return { ok: true, serverUrl: found.serverUrl, app: found.app };
 }
 
 async function apiFetch(path, { method = 'GET', body } = {}) {
@@ -33,21 +58,55 @@ async function apiFetch(path, { method = 'GET', body } = {}) {
 }
 
 async function ping() {
-  const { serverUrl, token } = await getConfig();
+  const found = await discover();
+  if (!found.ok) return found;
+  const { token } = await getConfig();
+  if (!token) return { ...found, authed: false, needsPair: true };
+  const st = await apiFetch('/api/status');
+  if (st.status === 401) return { ...found, authed: false, needsPair: true, authError: true };
+  return { ...found, authed: true, status: st.data && st.data.data };
+}
+
+async function pairConnector() {
+  const found = await discover();
+  if (!found.ok) return found;
   try {
-    const res = await fetch(serverUrl + '/api/ping', { signal: AbortSignal.timeout(4000) });
-    if (!res.ok) return { ok: false, error: 'HTTP ' + res.status };
-    const p = await res.json();
-    if (!token) return { ok: true, app: p, authed: false };
-    const st = await apiFetch('/api/status');
-    if (st.status === 401) return { ok: true, app: p, authed: false, authError: true };
-    return { ok: true, app: p, authed: true, status: st.data && st.data.data };
+    const res = await fetch(found.serverUrl + '/api/connector/pair', {
+      method: 'POST',
+      signal: AbortSignal.timeout(120000),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client: 'PaperWeave Connector', extensionId: chrome.runtime.id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok || !data.data || !data.data.token) {
+      return { ...found, authed: false, needsPair: true, error: data.error || ('配对失败：HTTP ' + res.status) };
+    }
+    await chrome.storage.local.set({ serverUrl: found.serverUrl, token: data.data.token });
+    return ping();
   } catch (e) {
-    return { ok: false, error: e.name === 'AbortError' || e.name === 'TimeoutError' ? '连接超时' : '无法连接（PaperWeave 桌面端是否在运行？）' };
+    return { ...found, authed: false, needsPair: true, error: e.name === 'TimeoutError' ? '连接等待超时，请重试' : e.message };
   }
 }
 
+async function connect() {
+  const current = await ping();
+  if (current.ok && current.authed) return current;
+  if (!current.ok) return current;
+  return pairConnector();
+}
+
+async function listLibraries() {
+  const connected = await connect();
+  if (!connected.ok || !connected.authed) return { ok: false, error: connected.error || '无法连接 PaperWeave' };
+  const { status, data } = await apiFetch('/api/libraries');
+  if (status === 401) return { ok: false, error: '连接已失效，请重试' };
+  if (!data.ok) return { ok: false, error: data.error || ('HTTP ' + status) };
+  return { ok: true, current: data.data.current, libraries: data.data.libraries || [] };
+}
+
 async function importPaper(meta) {
+  const connected = await connect();
+  if (!connected.ok || !connected.authed) return { ok: false, error: connected.error || '无法连接 PaperWeave' };
   const payload = {
     url: meta.url,
     pdfUrl: meta.pdfUrl || undefined,
@@ -57,9 +116,10 @@ async function importPaper(meta) {
     doi: meta.doi || undefined,
     abstract: meta.abstract || undefined,
     venue: meta.venue || undefined,
+    libraryId: meta.libraryId || undefined,
   };
   const { status, data } = await apiFetch('/api/papers/import-web', { method: 'POST', body: payload });
-  if (status === 401) return { ok: false, error: '访问令牌错误，请在插件设置中核对' };
+  if (status === 401) return { ok: false, error: '连接已失效，请重试' };
   if (!data.ok) return { ok: false, error: data.error || ('HTTP ' + status) };
   return { ok: true, paper: data.data && data.data.paper, duplicate: !!(data.data && data.data.duplicate) };
 }
@@ -160,6 +220,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     try {
       if (msg.type === 'pw:ping') return sendResponse(await ping());
+      if (msg.type === 'pw:discover') return sendResponse(await discover());
+      if (msg.type === 'pw:connect') return sendResponse(await connect());
+      if (msg.type === 'pw:libraries') return sendResponse(await listLibraries());
+      if (msg.type === 'pw:pair') return sendResponse(await pairConnector());
       if (msg.type === 'pw:import') return sendResponse(await importPaper(msg.meta || {}));
       if (msg.type === 'pw:arxivMeta') return sendResponse(await arxivMetaFromAbs(msg.absUrl));
       if (msg.type === 'pw:saveTab') {

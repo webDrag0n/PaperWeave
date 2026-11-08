@@ -86,6 +86,8 @@ async function startAgentInterface() {
     onChanged: notifyChanged,
     refsProgress,
     onProgress: progressEmitter,
+    // 仅浏览器扩展来源可配对；自动签发，普通网页仍被接口层拒绝。
+    onConnectorPair: async () => true,
   });
   if (!started) return;
   agentServer = started.server;
