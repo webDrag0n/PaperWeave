@@ -5,6 +5,7 @@ const { net } = require('electron');
 const { extractPdfInfo, bufferIntoLibrary } = require('./importer');
 const { fetchReferencesOnline, fetchCitationsOnline, matchReferencesToLibrary, splitReferenceEntries, extractArxivId, fetchArxivMeta, findRefPdfUrl } = require('./refs');
 const { createDownloadQueue } = require('./download-queue');
+const { arxivIdOf, reconcileYear } = require('./pubyear');
 
 function uid() { return 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
@@ -13,6 +14,7 @@ function createService(store, opts = {}) {
   const runDownloadTasks = createDownloadQueue();
   const fetchImpl = typeof opts.fetch === 'function' ? opts.fetch : (...args) => net.fetch(...args);
   const referencesOnline = typeof opts.referencesOnline === 'function' ? opts.referencesOnline : fetchReferencesOnline;
+  const refPdfUrl = typeof opts.findRefPdfUrl === 'function' ? opts.findRefPdfUrl : findRefPdfUrl;
   // 待确认的导入（GUI 弹窗确认走这里）：token → { buf, nameHint, info, candidates }
   const pendingImports = new Map();
   const PENDING_TTL = 10 * 60 * 1000;
@@ -216,12 +218,24 @@ function createService(store, opts = {}) {
     }
     const name = decodeURIComponent(path.basename(new URL(finalUrl).pathname)) || 'download.pdf';
     const result = await importOnePdfBuffer(buf, name.endsWith('.pdf') ? name : name + '.pdf', opts);
+    if (!result || !result.paper) return result;
+    const paperId = result.paper.id;
+    // 链接里的 arXiv 编号是这篇论文的可靠身份：补 DOI，并把年份校正到编号年份附近
+    // （PDF 里抽到的年份可能来自正文，编号年份才是首次提交时间）
+    const urlAxId = arxivIdOf(finalUrl) || arxivIdOf(url);
+    if (urlAxId) {
+      const live = store.getPaper(paperId);
+      const patch = {};
+      if (!live.doi) patch.doi = 'arXiv:' + urlAxId;
+      const fixedYear = reconcileYear(live.year, 'arXiv:' + urlAxId);
+      if (fixedYear !== String(live.year || '')) patch.year = fixedYear;
+      if (Object.keys(patch).length) store.updatePaper(paperId, patch);
+    }
     // arXiv 导入补全：PDF 正文通常不含摘要，经 arXiv API 补回（不覆盖已提取字段）
     try {
-      const paper = result && result.paper;
+      const paper = store.getPaper(paperId);
       if (paper && (!paper.abstract || !(paper.authors || []).length)) {
-        const urlM = String(url).match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})/i);
-        const axId = extractArxivId(paper.doi) || (urlM ? urlM[1] : null);
+        const axId = extractArxivId(paper.doi) || urlAxId;
         if (axId) {
           const meta = await fetchArxivMeta(axId);
           if (meta) {
@@ -236,7 +250,7 @@ function createService(store, opts = {}) {
     } catch (e) {
       console.error('arXiv 元数据补全失败：', e.message);
     }
-    return result;
+    return { ...result, paper: pub(store.getPaper(paperId)) };
   }
 
   // 抓取"引用"（参考文献）：解析 PDF 参考文献段落，经 DOI/arXiv/标题网络检索匹配进库；
@@ -314,19 +328,49 @@ function createService(store, opts = {}) {
     const ref = (paper.externalRefs || []).find(r => r.key === key);
     if (!ref) return { ok: false, error: '未找到该引用条目（可能已入库或已被移除）' };
     const emit = onProgress || (() => {});
-    emit({ stage: 'download', current: 0, total: 1, currentItem: ref.title.slice(0, 60), note: '正在解析下载地址…' });
-    const url = await findRefPdfUrl(ref);
-    if (!url) return { ok: false, error: '未找到开放获取的 PDF（非 arXiv / OpenAlex OA 来源），可尝试手动下载后导入' };
-    emit({ stage: 'download', current: 0, total: 1, currentItem: ref.title.slice(0, 60), note: '正在下载 PDF…' });
-    const result = await importFromUrl(url, { rating: 0, conflictPolicy: 'merge' }); // 引用下载：冲突自动复用已有论文
-    const newPaper = result.paper;
-    if (!newPaper) return { ok: false, error: '导入失败' };
+    const label = String(ref.title || '').slice(0, 60);
+    // 失败原因随条目持久化（downloadError / downloadTriedAt），界面据此列出「尚未下载」并支持重试
+    const fail = (error) => {
+      if (typeof store.setExternalRefError === 'function') store.setExternalRefError(paperId, key, error);
+      return { ok: false, error, key, dir: ref.dir, title: ref.title || '' };
+    };
+    emit({ stage: 'download', current: 0, total: 1, currentItem: label, note: '正在解析下载地址…' });
+    let result;
+    try {
+      const url = await refPdfUrl(ref);
+      if (!url) return fail('未找到开放获取的 PDF（非 arXiv / OpenAlex OA 来源），可尝试手动下载后导入');
+      emit({ stage: 'download', current: 0, total: 1, currentItem: label, note: '正在下载 PDF…' });
+      result = await importFromUrl(url, { rating: 0, conflictPolicy: 'merge' }); // 引用下载：冲突自动复用已有论文
+    } catch (e) {
+      // 记录原因后原样抛出：批量下载的调度器要根据 HTTP 状态做退避与重试
+      fail(e.message || '下载失败');
+      throw e;
+    }
+    if (!result.paper) return fail('导入失败');
+    // 新入库的论文：用引用条目的书目元数据（Semantic Scholar / OpenAlex / CrossRef）补全 PDF 里抽不到的字段
+    if (!result.duplicate && !result.reused) applyRefMetadata(result.paper.id, ref);
+    const newPaper = store.getPaper(result.paper.id);
     // 建边：dir=out 表示本文引用了它；dir=in 表示它引用了本文
     if (ref.dir === 'out') store.addLink(paperId, newPaper.id, 'ref-download');
     else store.addLink(newPaper.id, paperId, 'ref-download');
     store.removeExternalRef(paperId, key);
     emit({ stage: 'download', current: 1, total: 1, currentItem: newPaper.title.slice(0, 60), note: result.duplicate ? '库中已存在，已关联 ✓' : '下载入库 ✓' });
-    return { ok: true, paper: { ...newPaper, refText: undefined }, duplicate: !!result.duplicate };
+    return { ok: true, paper: pub(newPaper), duplicate: !!result.duplicate };
+  }
+
+  // 引用条目元数据 → 论文：只补空白字段；年份例外——非 arXiv 论文以书目数据库的发表年份为准
+  // （arXiv 论文的年份已在 importFromUrl 里按编号校正）
+  function applyRefMetadata(newPaperId, ref) {
+    const p = store.getPaper(newPaperId);
+    if (!p) return;
+    const patch = {};
+    if (!(p.authors || []).length && Array.isArray(ref.authors) && ref.authors.length) patch.authors = ref.authors;
+    if (!p.venue && ref.venue) patch.venue = ref.venue;
+    if (!p.doi && ref.doi) patch.doi = ref.doi;
+    const refYear = /^(19|20)\d{2}$/.test(String(ref.year || '')) ? String(ref.year) : '';
+    const isArxiv = !!(arxivIdOf(patch.doi || p.doi) || ref.arxivId);
+    if (refYear && (!p.year || (!isArxiv && String(p.year) !== refYear))) patch.year = refYear;
+    if (Object.keys(patch).length) store.updatePaper(newPaperId, patch);
   }
 
   // 一键下载全部未入库引用（dir: out / in / both），自适应并行并统一聚合进度
@@ -339,7 +383,7 @@ function createService(store, opts = {}) {
     const tasks = want.map(ref => ({
       key: paperId + ':' + ref.key,
       url: ref.arxivId ? 'https://arxiv.org/pdf/' + ref.arxivId : (ref.doi || ref.title),
-      label: ref.title.slice(0, 60),
+      label: String(ref.title || '').slice(0, 60),
       run: async () => {
         const r = await downloadRef(paperId, ref.key);
         if (!r.ok) throw new Error(r.error || '下载失败');
@@ -354,7 +398,8 @@ function createService(store, opts = {}) {
         if (r.value.result.duplicate) skipped++;
         else downloaded++;
       } else {
-        failed.push({ title: want[i].title.slice(0, 80), error: r.error.message });
+        // key / dir 供调用方对单条重试（POST download-ref）
+        failed.push({ key: want[i].key, dir: want[i].dir, title: String(want[i].title || '').slice(0, 80), error: r.error.message });
       }
     });
     return { ok: true, total: want.length, downloaded, skipped, failed };

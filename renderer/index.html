@@ -27,8 +27,9 @@
       <input id="searchInput" type="search" data-i18n-ph="搜索论文标题、作者、标签、DOI…" placeholder="搜索论文标题、作者、标签、DOI…" autocomplete="off">
     </div>
     <div class="top-actions">
+      <button class="btn" id="btnSettings" data-i18n="⚙ 设置" data-i18n-title="论文下载与数据目录" title="论文下载与数据目录">⚙ 设置</button>
       <button class="btn" id="btnExt" data-i18n="🧩 插件" data-i18n-title="浏览器插件：浏览 arXiv / PDF 页面时一键入库" title="浏览器插件：浏览 arXiv / PDF 页面时一键入库">🧩 插件</button>
-      <button class="icon-btn wide" id="btnLang" data-i18n-title="切换中英文界面" title="切换中英文界面">🌐 EN</button>
+      <button class="icon-btn wide" id="btnLang" data-i18n-title="切换中英文界面" title="切换中英文界面">🔤 EN</button>
       <button class="icon-btn wide" id="btnTheme" data-i18n-title="切换浅色 / 深色主题" title="切换浅色 / 深色主题">☀️</button>
     </div>
   </header>
@@ -42,6 +43,7 @@
         <aside id="libSidebar">
           <div class="libside-rail">
             <button id="btnLibToggle" data-i18n-title="展开 / 收起论文库面板" title="展开 / 收起论文库面板">▶<span class="rail-label" data-i18n="论文库">论文库</span></button>
+            <button class="rail-lib all-papers-entry" id="btnAllPapersRail" data-i18n-title="全部已下载（跨论文库）" title="全部已下载（跨论文库）">🗃</button>
             <div id="libRailIcons" class="lib-rail-icons"></div>
           </div>
           <div class="libside-body">
@@ -49,6 +51,7 @@
               <span data-i18n="论文库">论文库</span>
               <button class="icon-btn" id="btnLibCollapse" data-i18n-title="收起论文库面板" title="收起论文库面板">◀</button>
             </div>
+            <button class="all-papers-entry" id="btnAllPapers" data-i18n="🗃 全部已下载" data-i18n-title="查看所有已下载论文，独立于任何论文库" title="查看所有已下载论文，独立于任何论文库">🗃 全部已下载</button>
             <div id="libCards" class="lib-cards"></div>
             <button class="btn small libside-new" id="btnNewLibrary" data-i18n="＋ 新建论文库">＋ 新建论文库</button>
           </div>
@@ -120,7 +123,8 @@
         <button type="button" id="graphLineageClear" data-i18n="查看全部">查看全部</button>
       </div>
       <div class="graph-filter">
-        <label for="graphMinRating" data-i18n="节点筛选">节点筛选</label>
+        <span data-i18n="节点筛选">节点筛选</span>
+        <label for="graphMinRating" data-i18n="星级">星级</label>
         <select id="graphMinRating">
           <option value="all" data-i18n="全部（含未评分）">全部（含未评分）</option>
           <option value="1" data-i18n="≥ 1 星">≥ 1 星</option>
@@ -129,6 +133,14 @@
           <option value="4" data-i18n="≥ 4 星">≥ 4 星</option>
           <option value="5" data-i18n="仅 5 星">仅 5 星</option>
         </select>
+        <details id="graphAuthorFilter" class="graph-author-filter">
+          <summary id="graphAuthorSummary" data-i18n="作者：全部">作者：全部</summary>
+          <div class="graph-author-menu">
+            <input id="graphAuthorSearch" type="search" data-i18n-ph="搜索作者…" placeholder="搜索作者…" autocomplete="off">
+            <div id="graphAuthorOptions" class="graph-author-options"></div>
+            <button type="button" id="graphAuthorClear" data-i18n="清除作者筛选">清除作者筛选</button>
+          </div>
+        </details>
       </div>
       <div id="graphEmpty" class="hidden" data-i18n="当前筛选条件下没有论文">当前筛选条件下没有论文</div>
       <div id="graphTimelineCtl" class="graph-timeline-ctl hidden">
@@ -264,6 +276,10 @@
             <div id="notesPreview" class="markdown hidden"></div>
           </div>
           <div class="tab-page hidden" id="tab-refs">
+            <details id="refsDownloadFailures" class="refs-download-failures hidden">
+              <summary id="refsDownloadFailuresSummary"></summary>
+              <div id="refsDownloadFailuresList"></div>
+            </details>
             <div class="refs-actions">
               <button class="btn small" id="btnFetchReferences" data-i18n="📤 抓取引用（参考文献）" data-i18n-title="解析参考文献段落，经 DOI / arXiv / 标题网络检索匹配进库" title="解析参考文献段落，经 DOI / arXiv / 标题网络检索匹配进库">📤 抓取引用（参考文献）</button>
               <button class="btn small" id="btnFetchCitations" data-i18n="📥 抓取被引" data-i18n-title="从 Semantic Scholar 抓取谁引用了本文（失败自动回退 OpenAlex）" title="从 Semantic Scholar 抓取谁引用了本文（失败自动回退 OpenAlex）">📥 抓取被引</button>
@@ -349,6 +365,33 @@
       <div class="modal-actions">
         <button class="btn" id="importCancel" data-i18n="取消">取消</button>
         <button class="btn btn-primary" id="importGo" data-i18n="开始导入">开始导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 存储位置设置 -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-card">
+      <h3 data-i18n="⚙ 存储设置">⚙ 存储设置</h3>
+      <div class="storage-setting">
+        <label for="settingsLibraryDir" data-i18n="论文 PDF 下载目录">论文 PDF 下载目录</label>
+        <div class="storage-path-row">
+          <code id="settingsLibraryDir">—</code>
+          <button class="btn small" id="btnChooseLibraryDir" data-i18n="更改目录">更改目录</button>
+        </div>
+        <p class="modal-tip" data-i18n="更改后立即生效；现有 PDF 会复制到新目录，原文件保留。">更改后立即生效；现有 PDF 会复制到新目录，原文件保留。</p>
+      </div>
+      <div class="storage-setting">
+        <label for="settingsDataDir" data-i18n="论文与批注数据目录">论文与批注数据目录</label>
+        <div class="storage-path-row">
+          <code id="settingsDataDir">—</code>
+          <button class="btn small" id="btnChooseDataDir" data-i18n="更改目录">更改目录</button>
+        </div>
+        <p class="modal-tip" data-i18n="请选择空目录。现有数据会复制过去且原目录保留，重启应用后使用新目录。">请选择空目录。现有数据会复制过去且原目录保留，重启应用后使用新目录。</p>
+      </div>
+      <div id="settingsMsg" class="refs-msg" aria-live="polite"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="settingsClose" data-i18n="关闭">关闭</button>
       </div>
     </div>
   </div>

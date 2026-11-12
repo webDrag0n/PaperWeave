@@ -235,12 +235,18 @@ select option { background: var(--bg3); color: var(--text); }
   color: transparent; position: absolute; white-space: pre; cursor: text;
   transform-origin: 0 0;
 }
-.pdf-page .textLayer ::selection { background: rgba(74,163,255,.35); }
-.pdf-page .hlLayer { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+/* 高亮 / 搜索命中 / 文本选区一律作为文字的背景，而不是盖在文字上的半透明色块：
+   混合模式必须设在图层上——图层自身是层叠上下文（z-index），设在子元素上只会与空白图层混合，等于普通叠加。
+   正片叠底（multiply）下黑字 × 任意颜色仍是黑字，白底 × 颜色 = 颜色，文字的颜色与清晰度不受影响。 */
+.pdf-page .textLayer { mix-blend-mode: multiply; }
+.pdf-page .textLayer ::selection { background: rgba(74,163,255,.5); }
+.pdf-page .hlLayer { position: absolute; inset: 0; z-index: 1; pointer-events: none; mix-blend-mode: multiply; }
 .pdf-page .hl-box {
-  position: absolute; mix-blend-mode: multiply; opacity: .55; border-radius: 2px;
+  position: absolute; opacity: .8; border-radius: 2px;
   pointer-events: auto; cursor: pointer;
 }
+/* 从批注列表跳转时的定位提示：描边画在色块之外，不盖住文字 */
+.pdf-page .hl-box.flash { outline: 2px solid var(--accent2); outline-offset: 2px; }
 .pdf-page .sticky-icon {
   position: absolute; z-index: 3; width: 26px; height: 26px; margin: -13px 0 0 -13px;
   border-radius: 50%; background: var(--accent2); color: #fff; font-size: 14px;
@@ -441,6 +447,25 @@ select option { background: var(--bg3); color: var(--text); }
   padding: 3px 28px 3px 9px; border-radius: 8px; border: 1px solid var(--line);
   background-color: var(--bg3); color: var(--text); font-size: 12px; outline: none; cursor: pointer;
 }
+.graph-author-filter { position: relative; color: var(--text); }
+.graph-author-filter summary {
+  list-style: none; cursor: pointer; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg3); padding: 4px 9px; max-width: 180px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.graph-author-filter summary::-webkit-details-marker { display: none; }
+.graph-author-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; width: 240px;
+  padding: 9px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--bg2); box-shadow: var(--shadow-pop);
+}
+.graph-author-menu input { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg3); color: var(--text); }
+.graph-author-options { max-height: 220px; overflow-y: auto; margin: 7px 0; }
+.graph-author-options label { display: flex; align-items: center; gap: 7px; padding: 4px; cursor: pointer; overflow-wrap: anywhere; }
+.graph-author-options label:hover { background: var(--bg-hover); }
+#graphAuthorClear { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 4px; }
+.gs-author { border: 0; border-radius: 5px; padding: 1px 3px; background: none; color: inherit; cursor: pointer; font: inherit; }
+.gs-author:hover, .gs-author[aria-pressed="true"] { color: var(--accent); background: var(--bg-hover); }
 #graphEmpty {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   color: var(--text-dim); font-size: 14px; background: color-mix(in srgb, var(--bg2) 86%, transparent);
@@ -902,8 +927,10 @@ select option { background: var(--bg3); color: var(--text); }
 .eye-care #pdfPages { background: transparent; }
 .eye-care .pdf-page { background: #17181c; }
 .eye-care .pdf-page canvas { filter: invert(0.92) hue-rotate(180deg); }
-.eye-care .pdf-page .hl-box { mix-blend-mode: normal; opacity: .38; }
-.eye-care .pdf-page .textLayer ::selection { background: rgba(123,241,168,.35); }
+/* 护眼模式是浅字深底：改用滤色（screen），深底被染色、浅字只会更亮，同样不遮字 */
+.eye-care .pdf-page .hlLayer, .eye-care .pdf-page .textLayer { mix-blend-mode: screen; }
+.eye-care .pdf-page .hl-box { opacity: .42; }
+.eye-care .pdf-page .textLayer ::selection { background: rgba(123,241,168,.4); }
 
 /* ---------------- 目录 / 搜索侧栏 ---------------- */
 /* 目录：左侧轨道 + 可展开半透明面板 */
@@ -963,10 +990,45 @@ select option { background: var(--bg3); color: var(--text); }
 }
 .search-hit-item:hover { background: var(--bg-hover); }
 .search-hit-item .sh-page { color: var(--accent); font-size: 11px; }
-.search-hit-item mark { background: #ffe74a; color: #333; border-radius: 2px; padding: 0 1px; }
+/* 命中词：半透明底色衬在文字后面，文字沿用列表本身的颜色 */
+.search-hit-item mark { background: color-mix(in srgb, var(--yellow) 34%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
 .search-hit-item.active { background: var(--bg-hover); box-shadow: inset 2px 0 0 var(--accent); }
 .pdf-page .hl-box.search-hit {
-  background: #4aa3ff; opacity: .45; mix-blend-mode: multiply;
+  background: #4aa3ff; opacity: .55;
   pointer-events: none; border-radius: 2px;
 }
+.eye-care .pdf-page .hl-box.search-hit { opacity: .45; }
 .icon-btn.on, #btnBulkMode.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ---------------- 全部已下载 / 存储设置 / 下载失败 ---------------- */
+#btnAllPapers {
+  margin: 10px 10px 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--bg3); color: var(--text); cursor: pointer; text-align: left;
+}
+#btnAllPapers:hover, .all-papers-entry.current { border-color: var(--accent); color: var(--accent); background: var(--bg-hover); }
+#btnAllPapersRail { flex: 0 0 auto; }
+.library-banner.global .lb-icon, .library-banner.global .lb-name, .library-banner.global .lb-desc { cursor: default; }
+.library-banner.global .lb-icon:hover, .library-banner.global .lb-name:hover, .library-banner.global .lb-desc:hover { background: var(--bg3); transform: none; box-shadow: none; }
+.library-banner.global .lb-name:hover, .library-banner.global .lb-desc:hover { background: transparent; }
+.card-membership { font-size: 10px; }
+.storage-setting + .storage-setting { margin-top: 18px; }
+.storage-setting > label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; }
+.storage-path-row { display: flex; align-items: center; gap: 8px; }
+.storage-path-row code {
+  flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg3); color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all;
+}
+.storage-path-row .btn { flex: 0 0 auto; }
+.storage-setting .modal-tip { margin: 6px 0 0; }
+.refs-download-failures {
+  margin-bottom: 12px; border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line)); border-radius: 9px;
+  background: color-mix(in srgb, var(--danger) 6%, var(--bg3)); padding: 8px 10px;
+}
+.refs-download-failures summary { cursor: pointer; color: var(--danger); font-size: 12px; user-select: none; }
+#refsDownloadFailuresList { margin-top: 8px; display: flex; flex-direction: column; gap: 7px; }
+.download-failure { display: flex; align-items: flex-start; gap: 8px; padding-top: 7px; border-top: 1px dashed var(--line); }
+.df-main { flex: 1; min-width: 0; }
+.df-title { font-size: 12px; line-height: 1.45; }
+.df-reason { margin-top: 3px; color: var(--danger); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.df-retry { flex: 0 0 auto; }
+.gs-multi { margin-bottom: 6px; color: var(--yellow); }

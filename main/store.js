@@ -6,11 +6,13 @@
 //   library/*.pdf          统一大文件存储（内容 hash 命名，多库共享，不重复占盘）
 const fs = require('fs');
 const path = require('path');
+const { reconcileYear } = require('./pubyear');
 
 class Store {
-  constructor(rootDir) {
-    this.rootDir = rootDir;                       // userData/paperweave-data
-    this.libraryDir = path.join(rootDir, 'library'); // PDF 文件库（全局共享）
+  // opts.libraryDir：PDF 文件目录（可由用户另行指定）；缺省为 <rootDir>/library
+  constructor(rootDir, opts = {}) {
+    this.rootDir = rootDir;                       // 数据目录，缺省 userData/paperweave-data
+    this.libraryDir = opts.libraryDir || path.join(rootDir, 'library'); // PDF 文件库（全局共享）
     this.libsDir = path.join(rootDir, 'libraries');
     this.dataFile = path.join(rootDir, 'data.json');
     this.papersFile = path.join(rootDir, 'papers.json');
@@ -22,6 +24,10 @@ class Store {
     this.annotations = {};                           // 全局批注
     this._libsCache = new Map();                     // libId → { id, name, paperIds, links }
     this._load();
+    if (!opts.libraryDir && typeof this.meta.libraryDir === 'string' && this.meta.libraryDir) {
+      this.libraryDir = this.meta.libraryDir;
+      fs.mkdirSync(this.libraryDir, { recursive: true });
+    }
   }
 
   /* ---------------- 加载与迁移 ---------------- */
@@ -80,6 +86,21 @@ class Store {
     for (const p of this.papers) {
       if (typeof p.rating !== 'number') p.rating = 1;
       if (!Array.isArray(p.externalRefs)) p.externalRefs = [];
+    }
+    // 一次性修复：1.3.0 及之前把正文里第一个四位数字当成年份（1945、2048……）。
+    // arXiv 论文按编号年份校正，其余只清除不可能的未来年份；修复后用户手工修改不再被覆盖。
+    if (this.meta.yearRepair !== 1) {
+      let changed = false;
+      for (const p of this.papers) {
+        const fixed = reconcileYear(p.year, p.doi);
+        if (fixed !== String(p.year === undefined || p.year === null ? '' : p.year).trim()) {
+          p.year = fixed;
+          changed = true;
+        }
+      }
+      this.meta.yearRepair = 1;
+      if (changed) this.savePapers();
+      this.saveMeta();
     }
   }
 
@@ -182,7 +203,17 @@ class Store {
     const lib = this._lib(libId);
     return lib.paperIds.map(id => this.getPaper(id)).filter(Boolean).map(p => ({ ...p, refText: undefined }));
   }
-  listAllPapers() { return this.papers.map(p => ({ ...p, refText: undefined })); }
+  // 全局注册表里的全部论文（不限于某个论文库），每篇附带所属库 libraryIds（可能为空：所属库已被删除）
+  listAllPapers() {
+    const membership = new Map();
+    for (const l of this.meta.libraries) {
+      for (const id of this._lib(l.id).paperIds) {
+        if (!membership.has(id)) membership.set(id, []);
+        membership.get(id).push(l.id);
+      }
+    }
+    return this.papers.map(p => ({ ...p, refText: undefined, libraryIds: membership.get(p.id) || [] }));
+  }
   getPaper(id) { return this.papers.find(p => p.id === id) || null; }
   findByHash(hash) { return this.papers.find(p => p.hash === hash) || null; }
   findByDoi(doi) {
@@ -238,12 +269,82 @@ class Store {
     }
     return true;
   }
+  // 彻底删除：从所有论文库移除（连同各库内的关联）并删除全局记录、批注与可选的 PDF 文件
+  purgePaper(id, deleteFile) {
+    const p = this.getPaper(id);
+    if (!p) return false;
+    for (const l of this.meta.libraries) {
+      const lib = this._lib(l.id);
+      if (!lib.paperIds.includes(id) && !lib.links.some(k => k.from === id || k.to === id)) continue;
+      lib.paperIds = lib.paperIds.filter(x => x !== id);
+      lib.links = lib.links.filter(k => k.from !== id && k.to !== id);
+      this._saveLib(lib);
+    }
+    if (deleteFile && p.file) {
+      try { fs.unlinkSync(path.join(this.libraryDir, p.file)); } catch (_) {}
+    }
+    this.papers = this.papers.filter(x => x.id !== id);
+    delete this.annotations[id];
+    this.savePapers();
+    this.saveAnnots();
+    return true;
+  }
   paperFilePath(paper) {
     return paper && paper.file ? path.join(this.libraryDir, paper.file) : null;
+  }
+  // 切换 PDF 目录：复制已有文件后立即使用新目录；原文件保留，已存在的同名哈希文件不覆盖。
+  useLibraryDir(targetDir) {
+    const target = path.resolve(targetDir);
+    if (target === path.resolve(this.libraryDir)) return this.libraryDir;
+    fs.mkdirSync(target, { recursive: true });
+    for (const p of this.papers) {
+      if (!p.file) continue;
+      const src = path.join(this.libraryDir, p.file);
+      const dest = path.join(target, p.file);
+      if (fs.existsSync(src) && !fs.existsSync(dest)) fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
+    }
+    this.libraryDir = target;
+    this.meta.libraryDir = target;
+    this.saveMeta();
+    return target;
+  }
+  // 为更改数据目录制作一致副本。绝不覆盖目标中的已有 PaperWeave 数据。
+  copyDataTo(targetDir) {
+    const target = path.resolve(targetDir);
+    if (target === path.resolve(this.rootDir)) return this.rootDir;
+    const protectedFiles = ['data.json', 'papers.json', 'annotations.json', 'libraries'];
+    if (protectedFiles.some(name => fs.existsSync(path.join(target, name)))) {
+      throw new Error('目标目录已有 PaperWeave 数据，请选择空目录，以免覆盖现有论文库');
+    }
+    this.meta.libraryDir = this.libraryDir;
+    this.saveMeta();
+    this.savePapers();
+    this.saveAnnots();
+    fs.mkdirSync(target, { recursive: true });
+    for (const name of protectedFiles.slice(0, 3)) fs.copyFileSync(path.join(this.rootDir, name), path.join(target, name), fs.constants.COPYFILE_EXCL);
+    fs.mkdirSync(path.join(target, 'libraries'), { recursive: true });
+    for (const l of this.meta.libraries) {
+      this._saveLib(this._lib(l.id));
+      fs.copyFileSync(this._libFile(l.id), path.join(target, 'libraries', path.basename(this._libFile(l.id))), fs.constants.COPYFILE_EXCL);
+    }
+    return target;
   }
 
   /* ---------------- links（当前库视角，from 引用 to） ---------- */
   listLinks(libId) { return this._lib(libId).links; }
+  // 全局视图合并各库关系；同一对论文只显示一次，并保留可逐库解除的原始 id。
+  listAllLinks() {
+    const byPair = new Map();
+    for (const l of this.meta.libraries) {
+      for (const link of this._lib(l.id).links) {
+        const key = link.from + '\0' + link.to;
+        const origin = { id: link.id, libraryId: l.id };
+        if (byPair.has(key)) byPair.get(key).libraryLinks.push(origin);
+        else byPair.set(key, { ...link, libraryId: l.id, libraryLinks: [origin] });
+      }
+    }
+    return [...byPair.values()];
+  }
   addLink(from, to, source, libId) {
     if (from === to) return null;
     const lib = this._lib(libId);
@@ -276,10 +377,26 @@ class Store {
     const p = this.getPaper(id);
     if (!p) return null;
     if (!Array.isArray(p.externalRefs)) p.externalRefs = [];
-    p.externalRefs = p.externalRefs.filter(r => r.dir !== dir).concat(items || []);
+    // 重新抓取会整体替换该方向的条目；同一条目上一次的下载失败记录要带过来
+    const failures = new Map(p.externalRefs.filter(r => r.dir === dir && r.downloadError).map(r => [r.key, r]));
+    const next = (items || []).map(r => {
+      const old = failures.get(r.key);
+      return old && !r.downloadError ? { ...r, downloadError: old.downloadError, downloadTriedAt: old.downloadTriedAt } : r;
+    });
+    p.externalRefs = p.externalRefs.filter(r => r.dir !== dir).concat(next);
     p.updatedAt = Date.now();
     this.savePapers();
     return p.externalRefs;
+  }
+  // 记录某条未入库引用的下载失败原因（下载成功后条目本身会被移除，无需清除）
+  setExternalRefError(id, key, error) {
+    const p = this.getPaper(id);
+    const ref = p && Array.isArray(p.externalRefs) ? p.externalRefs.find(r => r.key === key) : null;
+    if (!ref) return false;
+    ref.downloadError = String(error || '下载失败').slice(0, 500);
+    ref.downloadTriedAt = Date.now();
+    this.savePapers();
+    return true;
   }
   removeExternalRef(id, key) {
     const p = this.getPaper(id);

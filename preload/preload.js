@@ -6,9 +6,13 @@ contextBridge.exposeInMainWorld('paperweave', {
   libInfo: () => ipcRenderer.invoke('lib:info'),
 
   listPapers: () => ipcRenderer.invoke('papers:list'),
+  listAllPapers: () => ipcRenderer.invoke('papers:listAll'),
   getPaper: (id) => ipcRenderer.invoke('paper:get', id),
   updatePaper: (id, patch) => ipcRenderer.invoke('paper:update', id, patch),
   removePaper: (id, deleteFile) => ipcRenderer.invoke('paper:remove', id, deleteFile),
+  purgePaper: (id, deleteFile) => ipcRenderer.invoke('paper:purge', id, deleteFile),
+  chooseLibraryDir: () => ipcRenderer.invoke('settings:chooseLibraryDir'),
+  chooseDataDir: () => ipcRenderer.invoke('settings:chooseDataDir'),
   readPaperBytes: async (id) => {
     const buf = await ipcRenderer.invoke('paper:readBytes', id);
     return buf ? new Uint8Array(buf) : null;
@@ -30,8 +34,9 @@ contextBridge.exposeInMainWorld('paperweave', {
   saveAnnotations: (paperId, anns) => ipcRenderer.invoke('ann:save', paperId, anns),
 
   listLinks: () => ipcRenderer.invoke('links:list'),
+  listAllLinks: () => ipcRenderer.invoke('links:listAll'),
   addLink: (from, to, source) => ipcRenderer.invoke('link:add', from, to, source),
-  removeLink: (id) => ipcRenderer.invoke('link:remove', id),
+  removeLink: (id, libId) => ipcRenderer.invoke('link:remove', id, libId),
 
   fetchRefs: (paperId) => ipcRenderer.invoke('refs:fetch', paperId),
   fetchReferences: (paperId) => ipcRenderer.invoke('refs:fetchReferences', paperId),

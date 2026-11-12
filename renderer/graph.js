@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { parseInlineMd, inlineMd as inlineMdHtml } from './markdown.js';
-import { computeTimelineLayout } from './graph-layout.js';
+import { computeTimelineLayout, collectPathsBetween } from './graph-layout.js';
 import { t } from './i18n.js';
 
 const THEMES = {
@@ -732,6 +732,16 @@ export class GraphView {
     return { pathNodes, pathEdges };
   }
 
+  // 时间线视图多选：选中论文两两之间的全部路径（引用链优先，没有引用链时取全部最短无向路径）
+  _computeAllPaths() {
+    const found = collectPathsBetween(this.edges.map(e => e.link), this.selectedIds);
+    return {
+      pathNodes: found.nodes,
+      pathEdges: new Set([...found.edges].map(i => this.edges[i])),
+      pairs: found.pairs,
+    };
+  }
+
   _recolor() {
     const T = this.T;
     const sel = this.selectedIds;
@@ -777,21 +787,27 @@ export class GraphView {
       }
     }
 
-    // 多选：最短关联的轮廓高亮（不覆盖跳数颜色，仅叠加描边环与亮线）
+    // 多选：关联路径的轮廓高亮（不覆盖跳数颜色，仅叠加描边环与亮线）。
+    // 网络视图只勾勒两两之间的最短关联；时间线视图勾勒两两之间的全部路径。
     while (this.pathGroup.children.length) {
       const c = this.pathGroup.children.pop();
       disposeObj(c);
       this.pathGroup.remove(c);
     }
+    this.pathInfo = null;
     if (sel.length >= 2) {
-      const { pathNodes, pathEdges } = this._computeShortestPaths();
+      const allPaths = this.viewMode === 'timeline';
+      const { pathNodes, pathEdges } = allPaths ? this._computeAllPaths() : this._computeShortestPaths();
+      this.pathInfo = { mode: allPaths ? 'all' : 'shortest', nodeCount: pathNodes.size, edgeCount: pathEdges.size };
+      // 加色混合在浅色背景上不可见（深色 + 白底 = 白底），浅色主题改用普通混合
+      const blending = this.theme === 'light' ? THREE.NormalBlending : THREE.AdditiveBlending;
       for (const id of pathNodes) {
         const nd = this.nodes.find(n => n.id === id);
         if (!nd) continue;
         const r = nd.mesh.geometry.parameters.radius;
         const ring = new THREE.Sprite(new THREE.SpriteMaterial({
           map: pathRingTexture(), color: T.pathOutline, transparent: true, opacity: 0.95,
-          blending: THREE.AdditiveBlending, depthWrite: false,
+          blending, depthWrite: false,
         }));
         ring.scale.set(r * 4.6, r * 4.6, 1);
         ring.position.copy(nd.pos);
@@ -801,9 +817,19 @@ export class GraphView {
         const geo = new THREE.BufferGeometry().setFromPoints([e.a.pos, e.b.pos]);
         const mat = new THREE.LineBasicMaterial({
           color: T.pathOutline, transparent: true, opacity: 0.9,
-          blending: THREE.AdditiveBlending, depthWrite: false,
+          blending, depthWrite: false,
         });
-        this.pathGroup.add(new THREE.Line(geo, mat));
+        const line = new THREE.Line(geo, mat);
+        line.userData.pathEdge = true;
+        this.pathGroup.add(line);
+      }
+      // 时间线上边很密：路径之外的边压暗，路径上的边保持高亮并加强流光，让全部路径一眼可辨
+      if (allPaths && pathEdges.size) {
+        for (const e of this.edges) {
+          const onPath = pathEdges.has(e);
+          e.line.material.opacity = onPath ? 1 : 0.1;
+          if (e.pulse) e.pulseBase = onPath ? 0.95 : 0.15;
+        }
       }
     }
     this.renderOnce();

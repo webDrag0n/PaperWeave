@@ -16,6 +16,12 @@ protocol.registerSchemesAsPrivileged([
 
 const SELFTEST = process.env.PAPERWEAVE_SELFTEST === '1';
 const HEADLESS = process.env.PAPERWEAVE_HEADLESS === '1';
+// 无窗口 API/MCP 测试无需 GPU；部分 Windows 环境的 GPU 子进程会反复崩溃并终止主进程。
+if (HEADLESS) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('disable-gpu');
+  app.commandLine.appendSwitch('in-process-gpu');
+}
 let store = null;
 let service = null;
 let mainWindow = null;
@@ -129,15 +135,49 @@ function registerIpc() {
   });
 
   ipcMain.handle('papers:list', () => store.listPapers());
+  ipcMain.handle('papers:listAll', () => store.listAllPapers());
   ipcMain.handle('paper:get', (e, id) => {
     const p = store.getPaper(id);
-    return p ? { ...p } : null;
+    return p ? { ...p, refText: undefined } : null;
   });
   ipcMain.handle('paper:update', (e, id, patch) => {
     const p = store.updatePaper(id, patch || {});
     return p ? { ...p, refText: undefined } : null;
   });
   ipcMain.handle('paper:remove', (e, id, deleteFile) => store.removePaper(id, !!deleteFile));
+  ipcMain.handle('paper:purge', (e, id, deleteFile) => store.purgePaper(id, !!deleteFile));
+  ipcMain.handle('settings:chooseLibraryDir', async () => {
+    const r = await dialog.showOpenDialog(mainWindow, {
+      title: '选择 PDF 下载目录（现有 PDF 会复制过去，原文件保留）',
+      defaultPath: store.libraryDir,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (r.canceled || !r.filePaths.length) return { canceled: true };
+    try { return { ok: true, libraryDir: store.useLibraryDir(r.filePaths[0]) }; }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
+  ipcMain.handle('settings:chooseDataDir', async () => {
+    const r = await dialog.showOpenDialog(mainWindow, {
+      title: '选择空的数据目录（现有数据会复制过去，重启后生效）',
+      defaultPath: store.rootDir,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (r.canceled || !r.filePaths.length) return { canceled: true };
+    try {
+      const target = store.copyDataTo(r.filePaths[0]);
+      const defaultRoot = path.join(app.getPath('userData'), 'paperweave-data');
+      fs.mkdirSync(defaultRoot, { recursive: true });
+      const pointerFile = path.join(defaultRoot, 'data.json');
+      let pointer = {};
+      try { pointer = JSON.parse(fs.readFileSync(pointerFile, 'utf-8')); } catch (_) {}
+      pointer.dataDir = target;
+      pointer.libraryDir = store.libraryDir;
+      const tmp = pointerFile + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(pointer, null, 1));
+      fs.renameSync(tmp, pointerFile);
+      return { ok: true, dataDir: target, restartRequired: target !== store.rootDir };
+    } catch (err) { return { ok: false, error: err.message }; }
+  });
   ipcMain.handle('paper:readBytes', async (e, id) => {
     const p = store.getPaper(id);
     const fp = store.paperFilePath(p);
@@ -183,8 +223,9 @@ function registerIpc() {
   ipcMain.handle('ann:save', (e, paperId, anns) => store.setAnnotations(paperId, anns));
 
   ipcMain.handle('links:list', () => store.listLinks());
+  ipcMain.handle('links:listAll', () => store.listAllLinks());
   ipcMain.handle('link:add', (e, from, to, source) => store.addLink(from, to, source));
-  ipcMain.handle('link:remove', (e, id) => store.removeLink(id));
+  ipcMain.handle('link:remove', (e, id, libId) => store.removeLink(id, libId));
 
   // 多论文库
   ipcMain.handle('libs:list', () => ({ current: store.currentLibraryId(), libraries: store.listLibraries() }));
@@ -262,13 +303,29 @@ app.whenReady().then(async () => {
     const legacyRoot = path.join(path.dirname(app.getPath('userData')), 'papergraph', 'papergraph-data');
     if (!fs.existsSync(newRoot) && fs.existsSync(legacyRoot)) fs.renameSync(legacyRoot, newRoot);
   } catch (_) { /* 迁移失败不影响全新启动 */ }
-  store = new Store(path.join(app.getPath('userData'), 'paperweave-data'));
+  const defaultRoot = path.join(app.getPath('userData'), 'paperweave-data');
+  let dataRoot = defaultRoot;
+  let bootstrap = {};
+  try { bootstrap = JSON.parse(fs.readFileSync(path.join(defaultRoot, 'data.json'), 'utf-8')); } catch (_) {}
+  if (typeof bootstrap.dataDir === 'string' && bootstrap.dataDir && fs.existsSync(bootstrap.dataDir)) {
+    dataRoot = path.resolve(bootstrap.dataDir);
+  }
+  let libraryDir = bootstrap.libraryDir;
+  if (dataRoot !== defaultRoot) {
+    try {
+      const targetMeta = JSON.parse(fs.readFileSync(path.join(dataRoot, 'data.json'), 'utf-8'));
+      libraryDir = targetMeta.libraryDir || libraryDir;
+    } catch (_) {}
+  }
+  store = new Store(dataRoot, { libraryDir });
   service = createService(store, { progressFor: (id) => progressEmitter(id) });
   registerIpc();
   placeAgentsDoc();
   await startAgentInterface();
-  createWindow();
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  if (!HEADLESS) {
+    createWindow();
+    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  }
 });
 
 app.on('window-all-closed', () => {

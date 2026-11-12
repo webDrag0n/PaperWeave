@@ -24,6 +24,13 @@ export async function runSelftest(ctx) {
     await sleep(400);
     check('批量与导入归属论文库工具栏', document.querySelector('#btnBulkMode').parentElement.id === 'libraryToolbar' && document.querySelector('#btnImport').parentElement.id === 'libraryToolbar');
     check('顶栏不再显示库级批量导入', !document.querySelector('.top-actions').contains(document.querySelector('#btnBulkMode')) && !document.querySelector('.top-actions').contains(document.querySelector('#btnImport')));
+    check('语言与 3D 图谱不再共用图标', document.querySelector('#btnLang').textContent.includes('🔤') && document.querySelector('#btnGraphFromLib').textContent.includes('🌐'));
+    document.querySelector('#btnSettings').click();
+    await sleep(100);
+    const settingsInfo = await bridge.libInfo();
+    check('存储设置显示当前 PDF 与数据目录', !document.querySelector('#settingsModal').classList.contains('hidden') && document.querySelector('#settingsLibraryDir').textContent === settingsInfo.libraryDir && document.querySelector('#settingsDataDir').textContent === settingsInfo.dataDir);
+    document.querySelector('#settingsClose').click();
+    check('存储设置弹窗关闭', document.querySelector('#settingsModal').classList.contains('hidden'));
     check('全部下拉菜单统一圆角与自定义箭头', [...document.querySelectorAll('select')].every(el => {
       const style = getComputedStyle(el);
       return parseFloat(style.borderTopLeftRadius) >= 8 && style.appearance === 'none' && style.backgroundImage.includes('data:image/svg+xml');
@@ -41,7 +48,7 @@ export async function runSelftest(ctx) {
 
     // ---------- 2.5 未入库引用条目持久化 ----------
     await bridge.updatePaper(attention.id, { externalRefs: [
-      { key: 'arxiv:1412.6980', dir: 'out', title: 'Adam: A Method for Stochastic Optimization', authors: ['D. P. Kingma', 'J. Ba'], year: '2015', venue: 'ICLR', doi: 'arXiv:1412.6980', arxivId: '1412.6980', citeCount: 100000, source: 'test', fetchedAt: Date.now() },
+      { key: 'arxiv:1412.6980', dir: 'out', title: 'Adam: A Method for Stochastic Optimization', authors: ['D. P. Kingma', 'J. Ba'], year: '2015', venue: 'ICLR', doi: 'arXiv:1412.6980', arxivId: '1412.6980', citeCount: 100000, source: 'test', fetchedAt: Date.now(), downloadError: '未找到开放获取的 PDF（自测）', downloadTriedAt: Date.now() },
     ] });
     const wp = await bridge.getPaper(attention.id);
     check('未入库引用条目保存', Array.isArray(wp.externalRefs) && wp.externalRefs.length === 1 && wp.externalRefs[0].dir === 'out', 'ext=' + ((wp.externalRefs || []).length));
@@ -80,6 +87,11 @@ export async function runSelftest(ctx) {
     // ---------- 4.5 阅读辅助：搜索 / 目录 / 跳页 / 高亮防重叠 ----------
     const searchRes = await viewer.searchText('attention');
     check('全文搜索有结果', searchRes.length > 0, 'hits=' + searchRes.length);
+    document.querySelector('#sideSearchInput').value = 'attention';
+    document.querySelector('#sideSearchInput').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await sleep(500);
+    const searchMark = document.querySelector('.search-hit-item mark');
+    check('搜索命中保留原文字颜色', !!searchMark && getComputedStyle(searchMark).color === getComputedStyle(searchMark.closest('.search-hit-item')).color);
     await viewer.flashMatches(searchRes[0].page);
     await sleep(200);
     check('搜索命中临时高亮', document.querySelectorAll('.hl-box.search-hit').length > 0);
@@ -118,6 +130,15 @@ export async function runSelftest(ctx) {
     check('未入库条目提供下载按钮', !!document.querySelector('#refOutExt .ext-dl'));
     check('全部下载按钮可见', !document.querySelector('#btnDlAllOut').classList.contains('hidden'));
     check('引用计数含未入库数', document.querySelector('#refOutCount').textContent.includes('+1'), document.querySelector('#refOutCount').textContent);
+    const failurePanel = document.querySelector('#refsDownloadFailures');
+    check('无开放获取 PDF 的失败列表置顶并默认展开', !failurePanel.classList.contains('hidden') && failurePanel.open && failurePanel.textContent.includes('未找到开放获取的 PDF'));
+    const originalRetryDownload = bridge.downloadRef;
+    let retryCalls = 0;
+    bridge.downloadRef = async () => { retryCalls++; return { ok: false, error: '未找到开放获取的 PDF（自测重试）' }; };
+    failurePanel.querySelector('.df-retry').click();
+    await sleep(700);
+    bridge.downloadRef = originalRetryDownload;
+    check('失败原因列表允许逐条重试', retryCalls === 1 && document.querySelectorAll('#refsDownloadFailures .df-retry').length === 1, 'calls=' + retryCalls);
     // 防重叠：故意构造两行重叠的 quad，渲染后不得出现垂直重叠的色块
     viewer.annotations.push({
       id: 'a_test_overlap', type: 'highlight', page: 1,
@@ -157,6 +178,7 @@ export async function runSelftest(ctx) {
     check('高亮保存成功', savedAnns.some(a => a.id === 'a_test_hl' && a.type === 'highlight'), 'count=' + savedAnns.length);
     const hlBoxes = document.querySelectorAll('.hl-box').length;
     check('高亮渲染到页面', hlBoxes >= 1, 'boxes=' + hlBoxes);
+    check('高亮图层作为文字背景混合而非覆盖文字', getComputedStyle(viewer.pages[0].hlLayer).mixBlendMode === 'multiply' && getComputedStyle(viewer.pages[0].textLayerEl).mixBlendMode === 'multiply');
 
     // ---------- 5.5 鼠标中心平滑缩放：页面、文字与高亮必须共享同一坐标系 ----------
     await viewer.jumpToPage(1, 'auto');
@@ -491,6 +513,9 @@ export async function runSelftest(ctx) {
       check('时间线禁止三维旋转', graph.controls.enableRotate === false);
       check('时间线操作提示使用二维平移', document.querySelector('#graphLegend .legend-tip').textContent.includes('拖动平移'));
       check('切换布局保留选中状态', graph.selectedIds.includes(attention.id));
+      graph.select(bert.id, true);
+      check('时间线 Shift 加选显示两篇之间全部路径', graph.selectedIds.length === 2 && graph.pathInfo && graph.pathInfo.mode === 'all' && graph.pathInfo.edgeCount > 0, JSON.stringify(graph.pathInfo));
+      graph.select(attention.id);
       const timelineControls = document.querySelector('#graphTimelineCtl');
       const yearSelect = document.querySelector('#graphYearSelect');
       check('时间线导航与缩放控件存在', !!timelineControls && !!yearSelect);
@@ -633,6 +658,12 @@ export async function runSelftest(ctx) {
       window.__pg.receiveRefsProgress({ paperId: attention.id, stage: 'download', current: 2, total: 5, active: 2, pending: 3, concurrency: 3, currentItem: 'Parallel reference', note: '下载中…' });
       const gp = document.querySelector('#graphSideProgress');
       check('图谱显示并行进度与并发数', gp && !gp.classList.contains('hidden') && gp.textContent.includes('2 / 5') && gp.textContent.includes('并发 3'), gp && gp.textContent);
+      showView('library');
+      await sleep(4200);
+      showView('graph');
+      await sleep(350);
+      graph.opts.onSelect(attention.id, [attention.id]);
+      check('运行中的下载进度超过 4 秒且往返图谱后仍恢复', !gp.classList.contains('hidden') && gp.textContent.includes('2 / 5'), gp.textContent);
       graph.opts.onSelect(bert.id, [bert.id]);
       check('切换节点不显示上一论文进度', gp && gp.classList.contains('hidden'), gp && gp.textContent);
       window.__pg.receiveRefsProgress({ paperId: bert.id, stage: 'references', current: 1, total: 4, currentItem: 'BERT reference', note: '解析中' });
@@ -713,9 +744,16 @@ export async function runSelftest(ctx) {
     await sleep(500);
     check('阅读器进入图谱', state.view === 'graph');
     check('返回按钮指向阅读器', document.querySelector('#btnGraphBack').textContent.includes('继续阅读'), document.querySelector('#btnGraphBack').textContent);
+    window.__pg.receiveRefsProgress({ paperId: attention.id, status: 'start', stage: 'download', current: 1, total: 3, active: 1, pending: 2, concurrency: 2, currentItem: 'Return to reader', note: '下载中…' });
     document.querySelector('#btnGraphBack').click();
     await sleep(300);
     check('图谱退出回到阅读器', state.view === 'reader' && state.readerPaperId === attention.id);
+    showView('graph');
+    await sleep(4200);
+    document.querySelector('#btnGraphBack').click();
+    await sleep(250);
+    check('图谱返回阅读器后下载进度条仍存在', !document.querySelector('#refsProgress').classList.contains('hidden') && document.querySelector('#refsProgress').textContent.includes('1 / 3'), document.querySelector('#refsProgress').textContent);
+    window.__pg.refsProgressUI.end(attention.id);
 
     // ---------- 10. 手动关联 + 解除 ----------
     await bridge.addLink(resnet.id, attention.id, 'manual');
@@ -889,6 +927,37 @@ export async function runSelftest(ctx) {
     gfilter.dispatchEvent(new Event('change'));
     await sleep(400);
     check('恢复全部节点', graph.nodes.length === state.papers.length, 'nodes=' + graph.nodes.length);
+    const bertAuthors = (state.papers.find(p => p.id === bert.id) || {}).authors || [];
+    const vitAuthors = (state.papers.find(p => p.id === vit.id) || {}).authors || [];
+    await bridge.updatePaper(bert.id, { authors: ['Filter Alice', 'Filter Bob'] });
+    await bridge.updatePaper(vit.id, { authors: ['Filter Carol'] });
+    await refreshData();
+    gfilter.dispatchEvent(new Event('change'));
+    graph.opts.onSelect(bert.id, [bert.id]);
+    document.querySelector('#graphSideAuthors .gs-author[data-author="Filter Alice"]').click();
+    check('点击详情作者筛选图谱', graph.nodes.length === 1 && graph.nodes[0].id === bert.id);
+    check('详情作者显示选中状态', document.querySelector('#graphSideAuthors .gs-author[data-author="Filter Alice"]').getAttribute('aria-pressed') === 'true');
+    const authorMenu = document.querySelector('#graphAuthorFilter');
+    authorMenu.open = true;
+    const authorSearch = document.querySelector('#graphAuthorSearch');
+    authorSearch.value = 'Filter Carol';
+    authorSearch.dispatchEvent(new Event('input'));
+    const carol = document.querySelector('#graphAuthorOptions input[value="Filter Carol"]');
+    check('作者搜索定位候选项', !!carol && document.querySelectorAll('#graphAuthorOptions input').length === 1);
+    carol.click();
+    check('多选作者取并集', graph.nodes.length === 2 && graph.nodes.some(n => n.id === bert.id) && graph.nodes.some(n => n.id === vit.id));
+    gfilter.value = '5';
+    gfilter.dispatchEvent(new Event('change'));
+    check('星级与作者筛选取交集', graph.nodes.length === 1 && graph.nodes[0].id === bert.id);
+    document.querySelector('#graphAuthorClear').click();
+    check('清除作者筛选保留星级条件', graph.nodes.length === 1 && graph.nodes[0].id === bert.id && state.graphFilters.authors.size === 0);
+    gfilter.value = 'all';
+    gfilter.dispatchEvent(new Event('change'));
+    authorMenu.open = false;
+    authorSearch.value = '';
+    await bridge.updatePaper(bert.id, { authors: bertAuthors });
+    await bridge.updatePaper(vit.id, { authors: vitAuthors });
+    await refreshData();
     document.querySelector('#btnGraphBack').click();
     await sleep(250);
 
@@ -991,6 +1060,11 @@ export async function runSelftest(ctx) {
     await refreshData();
     check('跨库导入复用同一论文 id', !!reuseRes.results[0].reused && state.papers.length === 1 && state.papers[0].id === attention.id,
       JSON.stringify({ reused: reuseRes.results[0].reused, sameId: state.papers[0] && state.papers[0].id === attention.id }));
+    const orphanVariantPath = await bridge.selftestMakeVariant('s2s.pdf');
+    const orphanImport = await bridge.importPaths([orphanVariantPath]);
+    if (orphanImport.results[0] && orphanImport.results[0].conflict) await bridge.resolveImport(orphanImport.results[0].conflict.token, 'new');
+    await refreshData();
+    check('第二论文库包含一篇默认库没有的全新记录', state.papers.length === 2 && state.papers[1].id !== attention.id && /Sequence to Sequence/i.test(state.papers[1].title || ''));
     // 编辑名称
     const curLibId = state.currentLibraryId;
     const curCard = [...document.querySelectorAll('.lib-card')].find(c => c.dataset.id === curLibId);
@@ -1027,6 +1101,16 @@ export async function runSelftest(ctx) {
     document.querySelector('#libDeleteGo').click();
     await sleep(500);
     check('删除后回到默认库', state.currentLibraryId === libs0.current && state.papers.length === 6, 'papers=' + state.papers.length);
+
+    // ---------- 11.9a 全部已下载：跨库并保留未入库论文 ----------
+    document.querySelector('#btnAllPapers').click();
+    await sleep(500);
+    check('全部已下载独立于当前论文库', state.libraryScope === 'all' && state.papers.length === 7, 'papers=' + state.papers.length);
+    check('全部视图包含未加入任何库的论文', state.papers.some(p => !(p.libraryIds || []).length) && document.querySelector('#libraryGrid').textContent.includes('未加入论文库'));
+    check('全部视图汇总跨库引用关系', state.links.length >= 5, 'links=' + state.links.length);
+    document.querySelector(`.lib-card[data-id="${libs0.current}"]`).click();
+    await sleep(400);
+    check('从全部视图切回当前论文库', state.libraryScope === 'current' && state.papers.length === 6, 'papers=' + state.papers.length);
 
     // ---------- 11.9b 论文库 banner / 标志图标 / 折叠 emoji 栏 ----------
     await bridge.updateLibrary(libs0.current, { icon: '🤖' });

@@ -84,3 +84,89 @@ export function collectLineageIds(links, selectedId) {
   const downstream = walk(selectedId, citations);
   return { upstream, downstream, ids: new Set([selectedId, ...upstream, ...downstream]) };
 }
+
+/**
+ * 多选时收集选中论文两两之间的全部关联路径（时间线视图用）。
+ * from → to 表示“from 引用 to”。对每一对 (a, b)：
+ *   - 存在引用链（a 经若干次引用到达 b，或反向）时，取两个方向上的全部引用链。
+ *     边 u→v 位于某条 s ⇝ t 链上 ⇔ u 可由 s 到达（含 s）且 v 可到达 t（含 t）；
+ *   - 两个方向都没有引用链（例如二者只是共同引用了同一篇论文）时，退回全部最短无向路径。
+ * 返回 { nodes: Set<id>, edges: Set<links 下标>, pairs: [{ a, b, kind: 'chain' | 'shortest' | 'none' }] }。
+ */
+export function collectPathsBetween(links, selectedIds) {
+  const ids = [...new Set(selectedIds || [])];
+  const nodes = new Set();
+  const edges = new Set();
+  const pairs = [];
+  if (ids.length < 2) return { nodes, edges, pairs };
+
+  const out = new Map();   // id → [被它引用的 id]
+  const inc = new Map();   // id → [引用它的 id]
+  const both = new Map();  // 无向邻接
+  const add = (map, key, value) => {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(value);
+  };
+  links.forEach((link) => {
+    if (link.from === link.to) return;
+    add(out, link.from, link.to);
+    add(inc, link.to, link.from);
+    add(both, link.from, link.to);
+    add(both, link.to, link.from);
+  });
+  // 广度优先：返回 起点 → 各节点 的距离（含起点，距离 0）
+  const distances = (start, adjacency) => {
+    const dist = new Map([[start, 0]]);
+    const queue = [start];
+    for (let head = 0; head < queue.length; head++) {
+      const current = queue[head];
+      for (const next of adjacency.get(current) || []) {
+        if (dist.has(next)) continue;
+        dist.set(next, dist.get(current) + 1);
+        queue.push(next);
+      }
+    }
+    return dist;
+  };
+  const reachCache = new Map();
+  const reach = (kind, id) => {
+    const key = kind + ':' + id;
+    if (!reachCache.has(key)) reachCache.set(key, distances(id, kind === 'out' ? out : kind === 'in' ? inc : both));
+    return reachCache.get(key);
+  };
+  const take = (index) => {
+    edges.add(index);
+    nodes.add(links[index].from);
+    nodes.add(links[index].to);
+  };
+  // s 沿引用方向到达 t 的全部链
+  const chains = (s, t) => {
+    const fromS = reach('out', s);
+    const toT = reach('in', t);
+    if (!fromS.has(t)) return 0;
+    let count = 0;
+    links.forEach((link, index) => {
+      if (link.from !== link.to && fromS.has(link.from) && toT.has(link.to)) { take(index); count++; }
+    });
+    return count;
+  };
+
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      const a = ids[i], b = ids[j];
+      const chained = chains(a, b) + chains(b, a);
+      if (chained) { pairs.push({ a, b, kind: 'chain' }); continue; }
+      const fromA = reach('both', a);
+      const fromB = reach('both', b);
+      if (!fromA.has(b)) { pairs.push({ a, b, kind: 'none' }); continue; }
+      const total = fromA.get(b);
+      links.forEach((link, index) => {
+        if (link.from === link.to) return;
+        const onShortest = (u, v) => fromA.has(u) && fromB.has(v) && fromA.get(u) + 1 + fromB.get(v) === total;
+        if (onShortest(link.from, link.to) || onShortest(link.to, link.from)) take(index);
+      });
+      pairs.push({ a, b, kind: 'shortest' });
+    }
+  }
+  return { nodes, edges, pairs };
+}

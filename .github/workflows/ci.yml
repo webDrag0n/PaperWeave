@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast suites that run under plain Node (no Electron window). Gate for every PR.
+  test:
+    name: npm test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  # Electron suites. Manual trigger only until they are proven stable on hosted runners.
+  # Windows only: the runners clean up their process tree with taskkill.
+  e2e:
+    name: Electron end-to-end (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run apitest
+      - run: npm run mcptest
+      - run: npm run selftest
+      - name: Upload selftest report and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-output
+          path: |
+            selftest-report.json
+            shots/
+          if-no-files-found: ignore

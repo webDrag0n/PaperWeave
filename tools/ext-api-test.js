@@ -49,7 +49,7 @@ const service = {
   // 1. ping 无需鉴权 + CORS 头
   let res = await fetch(base + '/api/ping');
   let body = await res.json();
-  check('ping ok', body.ok && body.api === 8);
+  check('ping ok', body.ok && body.api === 9);
   check('ping CORS header', res.headers.get('access-control-allow-origin') === '*');
 
   // 2. OPTIONS 预检

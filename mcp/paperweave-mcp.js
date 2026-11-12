@@ -305,7 +305,7 @@ const TOOLS = [
   },
   {
     name: 'paperweave_download_ref',
-    description: '下载单条「未入库引用」（externalRefs 中的条目）：经 arXiv / OpenAlex 开放获取解析 PDF 地址，下载入库（默认无评分），并自动建立引用边。',
+    description: '下载单条「未入库引用」（externalRefs 中的条目）：经 arXiv / OpenAlex 开放获取解析 PDF 地址，下载入库（默认无评分）并自动建边；失败返回 key/dir/title/error 并记录 downloadError，可用原 key 重试。',
     inputSchema: {
       type: 'object',
       properties: {

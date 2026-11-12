@@ -596,8 +596,8 @@ export class PdfViewer {
       const boxes = p.hlLayer.querySelectorAll('.hl-box');
       for (const b of boxes) {
         if (b.title === (a.comment || a.text || '')) {
-          b.style.outline = '2px solid #fff';
-          setTimeout(() => { b.style.outline = ''; }, 900);
+          b.classList.add('flash');
+          setTimeout(() => b.classList.remove('flash'), 900);
         }
       }
     }, 450);

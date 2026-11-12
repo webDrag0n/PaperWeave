@@ -6,7 +6,7 @@
 
 - 应用：PaperWeave（跨平台论文阅读器，Windows / macOS / Linux）
 - 接口形式：本地 HTTP JSON API（`127.0.0.1`，仅本机回环）+ MCP stdio Server（`paperweave-mcp.js`）
-- API 版本：`8`（自 PaperWeave 1.3.0 起；鉴权头 `X-PaperWeave-Token`，浏览器插件自动配对并支持目标论文库导入）
+- API 版本：`9`（鉴权头 `X-PaperWeave-Token`，下载失败原因持久化并支持按条目重试）
 
 > **0.8.0 多论文库架构**：论文本体全局统一存储（每篇论文唯一 id，PDF 内容哈希命名共享一份文件），
 > 论文库（library）只记录「包含哪些论文 id + 库内引用关联」。批注 / 笔记 / 评星随论文全局保存。
@@ -131,7 +131,7 @@ PaperWeave Connector 无需用户手动复制令牌或确认授权：插件自�
 
 ```bash
 curl http://127.0.0.1:24680/api/ping
-# {"ok":true,"name":"PaperWeave","version":"0.8.0","api":4}
+# {"ok":true,"name":"PaperWeave","version":"1.4.0","api":9}
 ```
 
 ---
@@ -165,7 +165,9 @@ curl http://127.0.0.1:24680/api/ping
     "year": "2015", "venue": "ICLR",
     "doi": "arXiv:1412.6980", "arxivId": "1412.6980",
     "citeCount": 100000,                // 仅被引条目可能携带
-    "source": "arxiv", "fetchedAt": 1759900000000
+    "source": "arxiv", "fetchedAt": 1759900000000,
+    "downloadError": "未找到开放获取的 PDF", // 可选：最近一次下载失败原因
+    "downloadTriedAt": 1759900001000       // 可选：最近一次尝试时间
   }],
   "addedAt": 1759800000000,
   "updatedAt": 1759800000000
@@ -203,7 +205,7 @@ curl http://127.0.0.1:24680/api/ping
 
 ```bash
 curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/status
-# {"ok":true,"data":{"version":"0.1.0","papers":6,"links":9,"annotations":3,"libraryDir":"..."}}
+# {"ok":true,"data":{"version":"1.4.0","papers":6,"links":9,"annotations":3,"libraryDir":"..."}}
 ```
 
 ### 3.2 论文库（多库管理，0.8.0+）
@@ -274,8 +276,8 @@ curl -X POST -H "X-PaperWeave-Token: $TOKEN" -H "Content-Type: application/json"
 | DELETE | `/api/links/{linkId}` | 删除一条边 |
 | POST | `/api/papers/{id}/fetch-references` | 抓取"引用"：优先 Semantic Scholar 结构化参考文献（分页拉取 ≤500 条，含标题/DOI/arXiv/作者/被引数），未收录时回退 PDF 参考文献段落逐条检索（DOI(CrossRef)/arXiv/S2标题匹配/OpenAlex）；支持编号及无编号参考文献、机构作者与附录截断；未入库条目存入 `externalRefs`（dir=out）；响应含 `source`、`unresolved`（≤20 条）与 `external`（未入库数量） |
 | POST | `/api/papers/{id}/fetch-citations` | 抓取"被引"：Semantic Scholar（限流退避），失败自动回退 OpenAlex；未入库被引存入 `externalRefs`（dir=in，按被引数降序 ≤100 条） |
-| POST | `/api/papers/{id}/download-ref` | 下载单条未入库引用：Body `{"key": "<externalRefs 条目 key>"}`；经 arXiv / OpenAlex 开放获取解析 PDF，入库（rating=0）并自动建边 |
-| POST | `/api/papers/{id}/download-all-refs` | 自适应并行下载全部未入库引用：Body `{"dir": "out|in|both"}`（默认 both）；初始并发 3，按网络状况在 1–6 调整；单项失败不阻塞其他任务；响应含 `downloaded / skipped / failed` 汇总 |
+| POST | `/api/papers/{id}/download-ref` | 下载单条未入库引用：Body `{"key": "<externalRefs 条目 key>"}`；经 arXiv / OpenAlex 开放获取解析 PDF，入库（rating=0）并自动建边；失败响应含 `key / dir / title / error`，并把原因写入该条目的 `downloadError / downloadTriedAt`，可用同一 key 重试 |
+| POST | `/api/papers/{id}/download-all-refs` | 自适应并行下载全部未入库引用：Body `{"dir": "out|in|both"}`（默认 both）；初始并发 3，按网络状况在 1–6 调整；单项失败不阻塞其他任务；响应含 `downloaded / skipped / failed` 汇总，`failed[]` 每项含 `key / dir / title / error` |
 | GET | `/api/papers/{id}/fetch-progress` | 查询该论文最近一次/进行中的抓取或下载进度 |
 | POST | `/api/papers/{id}/fetch-refs` | 组合抓取（引用 + 被引）；响应含 `references` 与 `citations` 两个子结果 |
 | POST | `/api/papers/{id}/auto-match` | 离线解析参考文献段落，与库内论文模糊匹配建边 |
@@ -363,6 +365,8 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/graph
 | 7 | 1.2.0 | 浏览器插件新增 `POST /api/connector/pair`：自动发现本地桌面端，扩展来源经桌面端一次性授权后获取令牌，无需手动配置 API Key；普通网页配对请求被拒绝；GUI 年份标尺与时间线节点避让详情栏，批量与导入按钮归入各论文库工具栏 |
 | 7（HTTP 不变） | 1.2.0 | GUI：全部下拉菜单统一圆角、自定义箭头与焦点样式；时间线普通滚轮整体缩放，Shift+滚轮横向缩放，Ctrl+滚轮纵向缩放；论文标签固定 24px，采用长标题截断、上下交错与优先级碰撞检测避免重叠 |
 | 8 | 1.3.0 | 浏览器插件改为自动静默配对，无需点击连接或桌面端同意；弹窗立即显示连接与识别进度，新增论文库列表和目标库选择；`import-web` 新增可选 `libraryId`，保存时自动连接并记住目标库 |
+| 9 | 1.4.0 | 下载失败原因持久化到 `externalRefs[].downloadError / downloadTriedAt`；单条与批量下载失败结果新增 `key / dir / title`，可用原 key 重试；arXiv 下载按编号校正年份并以引用书目元数据补全空白字段 |
+| 9（HTTP 不变） | 1.4.0 | GUI：图谱节点支持星级与作者多维筛选、作者多选及详情栏点击筛选；时间线多选高亮全部引用路径 |
 
 > **维护者注意**：新增/修改接口或数据字段时，必须同步更新本文件并递增 API 版本号；
 > 本文件位于源码仓库 `agents/AGENTS.md`，打包时随应用分发（安装版在 `resources/AGENTS.md`，

@@ -51,9 +51,10 @@ function req(baseUrl, method, p, body, token, raw = false) {
 
 async function main() {
   const child = spawn(electron, ['.', '--user-data-dir=' + testDataDir], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stderr.on('data', () => {});
   let appLog = '';
+  child.stderr.on('data', d => { appLog += d; });
   child.stdout.on('data', d => { appLog += d; });
+  child.on('exit', (code, signal) => { appLog += `\n[child exit] code=${code} signal=${signal}`; });
 
   const infoFile = path.join(testDataDir, 'paperweave-data', 'agent-api.json');
 
@@ -73,7 +74,7 @@ async function main() {
     // 探活与鉴权
     const ping = await req(base, 'GET', '/api/ping');
     check('ping 无需令牌', ping.status === 200 && ping.json.ok);
-    check('API 版本 8（插件静默连接与目标库导入）', ping.json.api === 8, 'api=' + ping.json.api);
+    check('API 版本 9（下载失败原因与可重试条目）', ping.json.api === 9, 'api=' + ping.json.api);
     const noAuth = await req(base, 'GET', '/api/papers');
     check('无令牌被拒绝 401', noAuth.status === 401);
     const badAuth = await req(base, 'GET', '/api/papers', null, 'wrong-token');
@@ -182,6 +183,14 @@ async function main() {
     const extAll = ((r.json.data && r.json.data.externalRefs) || []);
     const ext = extAll.find(e => /adam/i.test(e.title || '')) || extAll.find(e => e.arxivId);
     check('externalRefs 持久化含未入库条目', !!ext, ext && ext.key);
+    const closed = { key: 'closed:no-oa', dir: 'out', title: '', authors: [], year: '', doi: '', source: 'test' };
+    await req(base, 'PATCH', `/api/papers/${attention.id}`, { externalRefs: [...extAll, closed] }, tk);
+    r = await req(base, 'POST', `/api/papers/${attention.id}/download-ref`, { key: closed.key }, tk);
+    check('download-ref 无 OA 失败返回可重试条目', r.status === 502 && !r.json.ok && r.json.key === closed.key && r.json.dir === 'out' && /开放获取/.test(r.json.error || ''), JSON.stringify(r.json));
+    r = await req(base, 'GET', `/api/papers/${attention.id}`, null, tk);
+    const failedRef = ((r.json.data && r.json.data.externalRefs) || []).find(e => e.key === closed.key);
+    check('下载失败原因与时间持久化', !!failedRef && /开放获取/.test(failedRef.downloadError || '') && failedRef.downloadTriedAt > 0, JSON.stringify(failedRef));
+    await req(base, 'PATCH', `/api/papers/${attention.id}`, { externalRefs: extAll }, tk);
     if (ext) {
       r = await req(base, 'POST', `/api/papers/${attention.id}/download-ref`, { key: ext.key }, tk);
       check('download-ref 下载入库', r.status === 200 && r.json.ok && !!r.json.data.paper, r.json.ok ? (r.json.data.paper.title || '').slice(0, 50) : (r.json && r.json.error));
@@ -253,6 +262,7 @@ async function main() {
     r = await req(base, 'GET', '/api/status', null, tk);
     check('status 统计正确', r.json.data.papers === 6 && r.json.data.annotations === 1, JSON.stringify(r.json.data));
   } catch (e) {
+    console.error(appLog.slice(-3000));
     check('测试异常终止: ' + e.message, false, appLog.slice(-500));
   } finally {
     // 杀整个进程树，避免便携版 wrapper 派生的孙进程残留

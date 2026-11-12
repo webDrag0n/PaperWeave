@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全问题 / Security vulnerability
+    url: https://github.com/webDrag0n/PaperWeave/security/advisories/new
+    about: 请私下报告，不要公开提 Issue / Report privately, not in a public issue
+  - name: Agent 接口文档 / Agent API reference
+    url: https://github.com/webDrag0n/PaperWeave/blob/main/agents/AGENTS.md
+    about: HTTP API 与 MCP 工具的完整说明 / Full reference for the HTTP API and MCP tools

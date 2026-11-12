@@ -55,7 +55,7 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
 
     // 公共探活
     if (u.pathname === '/api/ping') {
-      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 8 });
+      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 9 });
     }
 
     // 浏览器插件配对：仅扩展来源可发起，必须由桌面端明确批准。

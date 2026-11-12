@@ -50,6 +50,11 @@ function makeStore(withSource = false) {
       if (p) p.externalRefs = p.externalRefs.filter(r => r.key !== key);
     },
     setExternalRefs() {},
+    setExternalRefError(id, key, error) {
+      const ref = ((this.getPaper(id) || {}).externalRefs || []).find(r => r.key === key);
+      if (ref) { ref.downloadError = error; ref.downloadTriedAt = Date.now(); }
+      return !!ref;
+    },
   };
 }
 
@@ -115,10 +120,52 @@ function trackingFetch() {
   assert.equal(downloadProgress.at(-1).total, 4);
   console.log('PASS 引用并行下载、自动建边与聚合进度');
 
+  // 年份：链接里的 arXiv 编号优先于 PDF 内文；非 arXiv 论文以引用条目的书目年份为准。
+  // 故意让样例扮演别的论文：gpt.pdf（PDF 内年份 2018）当作 arXiv:2407.14207 下载；
+  // bert.pdf（首页 “Year 2019”，DOI 为 ACL 的 10.18653/…）当作一篇 2016 年的期刊论文。
+  const yearStore = makeStore(true);
+  yearStore.getPaper('source').externalRefs = [
+    { key: 'arxiv:2407.14207', arxivId: '2407.14207', doi: 'arXiv:2407.14207', dir: 'out', title: 'Longhorn', authors: [], year: '2024' },
+    { key: 'doi:10.1/journal', doi: '10.1/journal', dir: 'in', title: 'Journal Paper', authors: ['A. Author'], year: '2016', venue: 'Some Journal' },
+    { key: 'doi:10.1/closed', doi: '10.1/closed', dir: 'out', title: 'Closed Access Paper', authors: [], year: '2011' },
+  ];
+  const yearService = createService(yearStore, {
+    fetch: async url => new Response(samples[/2407\.14207/.test(String(url)) ? 2 : 1], { status: 200, headers: { 'Content-Type': 'application/pdf' } }),
+    findRefPdfUrl: async ref => (ref.arxivId ? 'https://arxiv.org/pdf/' + ref.arxivId : ref.key === 'doi:10.1/journal' ? 'https://papers.test/journal.pdf' : null),
+  });
+  const byArxiv = await yearService.downloadRef('source', 'arxiv:2407.14207');
+  assert.equal(byArxiv.ok, true);
+  assert.equal(byArxiv.paper.year, '2024', 'arXiv 链接下载的论文年份取编号年份');
+  assert.equal(byArxiv.paper.refText, undefined, 'refText 不出主进程');
+  const byJournal = await yearService.downloadRef('source', 'doi:10.1/journal');
+  assert.equal(byJournal.ok, true);
+  assert.equal(byJournal.paper.year, '2016', '非 arXiv 论文年份取引用条目的书目年份');
+  assert.ok(yearStore.links.some(l => l.from === byJournal.paper.id && l.to === 'source'), 'dir=in：新论文引用了本文');
+  console.log('PASS 下载入库的年份取 arXiv 编号 / 书目元数据');
+
+  // 没有开放获取 PDF：返回原因与条目 key，原因随条目保存，批量结果可据此重试。
+  const closed = await yearService.downloadRef('source', 'doi:10.1/closed');
+  assert.equal(closed.ok, false);
+  assert.match(closed.error, /未找到开放获取的 PDF/);
+  assert.equal(closed.key, 'doi:10.1/closed');
+  const closedRef = yearStore.getPaper('source').externalRefs.find(r => r.key === 'doi:10.1/closed');
+  assert.match(closedRef.downloadError, /未找到开放获取的 PDF/);
+  assert.ok(closedRef.downloadTriedAt > 0);
+  const closedBatch = await yearService.downloadAllRefs('source', 'both');
+  assert.equal(closedBatch.total, 1);
+  assert.deepEqual(closedBatch.failed.map(f => [f.key, f.dir, f.title]), [['doi:10.1/closed', 'out', 'Closed Access Paper']]);
+  assert.match(closedBatch.failed[0].error, /未找到开放获取的 PDF/);
+  console.log('PASS 无开放获取 PDF 时记录失败原因并返回可重试的条目 key');
+
   // 已入库的旧记录没有 refText 时，抓取前应从本地 PDF 按需重建。
+  // 真实论文 .tmp/2603.01966.pdf 不入库：存在时用它（37 条），否则退回仓库自带样例（3 条），保证全新克隆与 CI 可运行。
+  const realPdf = path.join(root, '.tmp', '2603.01966.pdf');
+  const legacyCase = fs.existsSync(realPdf)
+    ? { pdf: realPdf, doi: 'arXiv:2603.01966', entries: 37 }
+    : { pdf: path.join(root, 'assets', 'samples', 'attention.pdf'), doi: 'arXiv:1706.03762', entries: 3 };
   const legacyStore = makeStore(true);
-  fs.copyFileSync(path.join(root, '.tmp', '2603.01966.pdf'), path.join(legacyStore.libraryDir, 'legacy.pdf'));
-  Object.assign(legacyStore.getPaper('source'), { file: 'legacy.pdf', refText: '', doi: 'arXiv:2603.01966' });
+  fs.copyFileSync(legacyCase.pdf, path.join(legacyStore.libraryDir, 'legacy.pdf'));
+  Object.assign(legacyStore.getPaper('source'), { file: 'legacy.pdf', refText: '', doi: legacyCase.doi });
   let legacyRefText = null;
   const legacyService = createService(legacyStore, {
     referencesOnline: async paper => {
@@ -128,7 +175,7 @@ function trackingFetch() {
   });
   await legacyService.fetchReferences('source');
   const { splitReferenceEntries } = require('../main/refs');
-  assert.equal(splitReferenceEntries(legacyRefText || '').length, 37);
+  assert.equal(splitReferenceEntries(legacyRefText || '').length, legacyCase.entries);
   console.log('PASS 旧论文抓取前从本地 PDF 重建参考文献');
 
   const mainSource = fs.readFileSync(path.join(root, 'main', 'main.js'), 'utf8');

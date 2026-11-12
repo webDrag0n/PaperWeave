@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { inferPublicationYear, arxivStampId } = require('./pubyear');
 
 let pdfjsPromise = null;
 function loadPdfjs() {
@@ -88,9 +89,11 @@ async function extractPdfInfo(buffer) {
   };
 
   // 1) PDF 元数据
+  let creationDate = '';
   try {
     const meta = await doc.getMetadata();
     const info = (meta && meta.info) || {};
+    creationDate = info.CreationDate || '';
     if (info.Title && cleanText(info.Title).length > 4) out.title = cleanText(info.Title);
     if (info.Author) out.authors = String(info.Author).split(/[;,]/).map(s => cleanText(s)).filter(Boolean);
   } catch (_) {}
@@ -120,13 +123,25 @@ async function extractPdfInfo(buffer) {
       tailText = itemsToLines(tc.items).join('\n');
     } catch (_) {}
   }
-  const doiMatch = (headText + '\n' + tailText).match(DOI_RE);
-  if (doiMatch) {
-    let doi = doiMatch[0].replace(/[.,;)>\]]+$/, '');
-    out.doi = doi;
+  // 论文自身的标识只可能出现在首页：首页 DOI → 首页 arXiv 盖章。
+  // 其余位置（第 2–3 页、末页）出现的 DOI / arXiv 编号多半属于参考文献，只作兜底。
+  const trimDoi = (s) => s.replace(/[.,;)>\]]+$/, '');
+  const firstPageText = headLines.join('\n');
+  const firstPageDoi = firstPageText.match(DOI_RE);
+  const stampId = arxivStampId(firstPageText);
+  let ownDoi = '';
+  if (firstPageDoi) ownDoi = trimDoi(firstPageDoi[0]);
+  else if (stampId) ownDoi = 'arXiv:' + stampId;
+  if (ownDoi) {
+    out.doi = ownDoi;
   } else {
-    const ax = (headText + '\n' + tailText).match(ARXIV_RE);
-    if (ax) out.doi = 'arXiv:' + ax[1];
+    const doiMatch = (headText + '\n' + tailText).match(DOI_RE);
+    if (doiMatch) {
+      out.doi = trimDoi(doiMatch[0]);
+    } else {
+      const ax = (headText + '\n' + tailText).match(ARXIV_RE);
+      if (ax) out.doi = 'arXiv:' + ax[1];
+    }
   }
 
   // 标题猜测：优先首页最大字号行；退化到最长行
@@ -155,13 +170,13 @@ async function extractPdfInfo(buffer) {
   const absM = headText.match(/abstract[.\s:—-]*([\s\S]{80,1200}?)(\n\s*\n|\n\s*1[.\s]|\n\s*I[.\s]|introduction|keywords|index terms)/i);
   if (absM) out.abstract = cleanText(absM[1]).slice(0, 1500);
 
-  // 年份
-  const yM = headText.match(/\b(19|20)\d{2}\b/);
-  if (yM) out.year = yM[0];
-
   // 3) 参考文献段落：从尾部向前自适应扩窗查找 References 标题
   // （长论文的参考文献常位于正文后、附录前，固定扫最后 6 页会漏掉）
   out.refText = await extractRefText(doc, itemsToLines);
+
+  // 4) 年份：arXiv 编号 → 首页出版标记 → 受参考文献约束的创建日期；都没有则留空。
+  // 不再取正文里第一个四位数字（会把 “Von Neumann, 1945”“2048 context length” 当成年份）。
+  out.year = inferPublicationYear({ firstPageLines: headLines, ownDoi, creationDate, refText: out.refText });
 
   try { doc.destroy(); } catch (_) {}
   return out;

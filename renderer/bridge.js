@@ -182,6 +182,26 @@ const webBridge = {
   isElectron: false,
   async libInfo() { return { libraryDir: '(浏览器 IndexedDB)', dataDir: 'localStorage', platform: 'web', version: '0.8.0-web' }; },
   async listPapers() { return libPapers(loadData()).map(pub); },
+  async listAllPapers() {
+    const d = loadData();
+    return d.papers.map(p => ({ ...pub(p), libraryIds: d.libraries.filter(l => l.paperIds.includes(p.id)).map(l => l.id) }));
+  },
+  async purgePaper(id, deleteFile) {
+    const d = loadData();
+    const p = d.papers.find(x => x.id === id);
+    if (!p) return false;
+    for (const lib of d.libraries) {
+      lib.paperIds = lib.paperIds.filter(x => x !== id);
+      lib.links = lib.links.filter(l => l.from !== id && l.to !== id);
+    }
+    if (deleteFile !== false) await idb.del(p.file);
+    d.papers = d.papers.filter(x => x.id !== id);
+    delete d.annotations[id];
+    saveData(d);
+    return true;
+  },
+  async chooseLibraryDir() { return { ok: false, error: '浏览器模式使用 IndexedDB，不能选择本地目录' }; },
+  async chooseDataDir() { return { ok: false, error: '浏览器模式使用 localStorage，不能选择本地目录' }; },
   async getPaper(id) { return loadData().papers.find(p => p.id === id) || null; },
   async updatePaper(id, patch) {
     const d = loadData();
@@ -349,6 +369,19 @@ const webBridge = {
     return d.annotations[paperId];
   },
   async listLinks() { return curLib(loadData()).links; },
+  async listAllLinks() {
+    const d = loadData();
+    const byPair = new Map();
+    for (const lib of d.libraries) {
+      for (const link of lib.links) {
+        const key = link.from + '\0' + link.to;
+        const origin = { id: link.id, libraryId: lib.id };
+        if (byPair.has(key)) byPair.get(key).libraryLinks.push(origin);
+        else byPair.set(key, { ...link, libraryId: lib.id, libraryLinks: [origin] });
+      }
+    }
+    return [...byPair.values()];
+  },
   onImportProgress(cb) { webImportProgressCb = cb; return () => { webImportProgressCb = null; }; },
   onRefsProgress(cb) { webProgressCb = cb; return () => { webProgressCb = null; }; },
   async addLink(from, to, source) {
@@ -362,9 +395,9 @@ const webBridge = {
     saveData(d);
     return link;
   },
-  async removeLink(id) {
+  async removeLink(id, libId) {
     const d = loadData();
-    const lib = curLib(d);
+    const lib = d.libraries.find(l => l.id === libId) || curLib(d);
     const i = lib.links.findIndex(l => l.id === id);
     if (i < 0) return false;
     lib.links.splice(i, 1);
@@ -476,26 +509,41 @@ const webBridge = {
     if (!paper) return { ok: false, error: '论文不存在' };
     const ref = (paper.externalRefs || []).find(r => r.key === key);
     if (!ref) return { ok: false, error: '未找到该引用条目' };
-    const { findRefPdfUrlWeb } = await import('./refs-web.js');
-    const url = await findRefPdfUrlWeb(ref);
-    if (!url) return { ok: false, error: '未找到开放获取的 PDF 下载地址' };
-    const r = await this.importUrl(url);
-    if (!r.ok && !r.paper) return { ok: false, error: r.error || '下载失败' };
-    // 冲突：自动复用已有论文
-    let newPaper = r.paper;
-    if (r.conflict) {
-      const rr = await this.resolveImport(r.conflict.token, 'merge');
-      if (!rr.ok) return { ok: false, error: rr.error || '合并失败' };
-      newPaper = rr.paper;
+    const fail = (error) => {
+      const cur = loadData();
+      const pp = cur.papers.find(x => x.id === paperId);
+      const item = pp && (pp.externalRefs || []).find(x => x.key === key);
+      if (item) {
+        item.downloadError = String(error || '下载失败').slice(0, 500);
+        item.downloadTriedAt = Date.now();
+        saveData(cur);
+      }
+      return { ok: false, error, key, dir: ref.dir, title: ref.title || '' };
+    };
+    try {
+      const { findRefPdfUrlWeb } = await import('./refs-web.js');
+      const url = await findRefPdfUrlWeb(ref);
+      if (!url) return fail('未找到开放获取的 PDF 下载地址');
+      const r = await this.importUrl(url);
+      if (!r.ok && !r.paper) return fail(r.error || '下载失败');
+      // 冲突：自动复用已有论文
+      let newPaper = r.paper;
+      if (r.conflict) {
+        const rr = await this.resolveImport(r.conflict.token, 'merge');
+        if (!rr.ok) return fail(rr.error || '合并失败');
+        newPaper = rr.paper;
+      }
+      // 引用下载的文献默认无评分（重复入库时不覆盖已有评星）
+      if (!r.duplicate && !newPaper.merged) await this.updatePaper(newPaper.id, { rating: 0 });
+      if (ref.dir === 'out') await this.addLink(paperId, newPaper.id, 'ref-download');
+      else await this.addLink(newPaper.id, paperId, 'ref-download');
+      const cur = loadData();
+      const pp = cur.papers.find(x => x.id === paperId);
+      if (pp) { pp.externalRefs = (pp.externalRefs || []).filter(x => x.key !== key); saveData(cur); }
+      return { ok: true, paper: newPaper, duplicate: !!(r.duplicate || newPaper.merged) };
+    } catch (e) {
+      return fail(e.message || '下载失败');
     }
-    // 引用下载的文献默认无评分（重复入库时不覆盖已有评星）
-    if (!r.duplicate && !newPaper.merged) await this.updatePaper(newPaper.id, { rating: 0 });
-    if (ref.dir === 'out') await this.addLink(paperId, newPaper.id, 'ref-download');
-    else await this.addLink(newPaper.id, paperId, 'ref-download');
-    const cur = loadData();
-    const pp = cur.papers.find(x => x.id === paperId);
-    if (pp) { pp.externalRefs = (pp.externalRefs || []).filter(x => x.key !== key); saveData(cur); }
-    return { ok: true, paper: newPaper, duplicate: !!(r.duplicate || newPaper.merged) };
   },
   async downloadAllRefs(paperId, dir) {
     const d = loadData();
@@ -506,7 +554,7 @@ const webBridge = {
     const tasks = want.map(ref => ({
       key: paperId + ':' + ref.key,
       url: ref.arxivId ? 'https://arxiv.org/pdf/' + ref.arxivId : (ref.doi || ref.title),
-      label: ref.title.slice(0, 60),
+      label: String(ref.title || '').slice(0, 60),
       run: async () => {
         const result = await this.downloadRef(paperId, ref.key);
         if (!result.ok) throw new Error(result.error || '下载失败');
@@ -523,7 +571,7 @@ const webBridge = {
         if (r.value.result.duplicate) skipped++;
         else downloaded++;
       } else {
-        failed.push({ title: want[i].title.slice(0, 80), error: r.error.message });
+        failed.push({ key: want[i].key, dir: want[i].dir, title: String(want[i].title || '').slice(0, 80), error: r.error.message });
       }
     });
     return { ok: true, total: want.length, downloaded, skipped, failed };

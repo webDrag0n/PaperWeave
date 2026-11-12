@@ -11,6 +11,17 @@ import { t, tf, applyI18n, getLang, setLangStorage } from './i18n.js';
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
+function loadGraphFilters() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('pg-graph-filters'));
+    if (saved && typeof saved === 'object') return {
+      rating: ['all', '1', '2', '3', '4', '5'].includes(saved.rating) ? saved.rating : 'all',
+      authors: new Set(Array.isArray(saved.authors) ? saved.authors.filter(x => typeof x === 'string' && x.trim()) : []),
+    };
+  } catch { /* 旧版或损坏的本地设置回退到原有星级 */ }
+  return { rating: localStorage.getItem('pg-graph-min-rating') || 'all', authors: new Set() };
+}
+
 const state = {
   papers: [],
   links: [],
@@ -25,9 +36,10 @@ const state = {
   sort: localStorage.getItem('pg-sort') || 'rating',
   graphFrom: 'library',
   graphViewMode: localStorage.getItem('pg-graph-view-mode') === 'timeline' ? 'timeline' : 'network',
-  graphMinRating: localStorage.getItem('pg-graph-min-rating') || 'all',
+  graphFilters: loadGraphFilters(),
   libraries: [],
   currentLibraryId: null,
+  libraryScope: 'current',    // current | all：全部已下载不隶属于任何单一论文库
 };
 
 let viewer = null;
@@ -49,8 +61,9 @@ function esc(s) {
 }
 
 async function refreshData() {
-  state.papers = await bridge.listPapers();
-  state.links = await bridge.listLinks();
+  const global = state.libraryScope === 'all';
+  state.papers = await (global ? bridge.listAllPapers() : bridge.listPapers());
+  state.links = await (global ? bridge.listAllLinks() : bridge.listLinks());
   await loadLibraries(); // 库卡片计数同步刷新
 }
 
@@ -127,13 +140,15 @@ function renderLibCards() {
     });
   }
   box.append(pinnedGroup, sep, normalGroup);
+  $('#btnAllPapers').classList.toggle('current', state.libraryScope === 'all');
+  $('#btnAllPapersRail').classList.toggle('current', state.libraryScope === 'all');
   renderLibRail();
   renderLibraryBanner();
 }
 
 function buildLibCard(l) {
   const card = document.createElement('div');
-  card.className = 'lib-card' + (l.id === state.currentLibraryId ? ' current' : '');
+  card.className = 'lib-card' + (state.libraryScope === 'current' && l.id === state.currentLibraryId ? ' current' : '');
   card.draggable = true;
   card.dataset.id = l.id;
   if (libEditingId === l.id) {
@@ -186,7 +201,8 @@ function buildLibCard(l) {
   });
   // 点击切换
   card.addEventListener('click', async () => {
-    if (l.id === state.currentLibraryId) return;
+    if (state.libraryScope === 'current' && l.id === state.currentLibraryId) return;
+    state.libraryScope = 'current';
     await bridge.switchLibrary(l.id);
     await loadLibraries();
     await reloadLibraryView();
@@ -229,11 +245,12 @@ function renderLibRail() {
   rail.innerHTML = '';
   for (const l of sortedLibraries()) {
     const b = document.createElement('button');
-    b.className = 'rail-lib' + (l.id === state.currentLibraryId ? ' current' : '');
+    b.className = 'rail-lib' + (state.libraryScope === 'current' && l.id === state.currentLibraryId ? ' current' : '');
     b.textContent = libIcon(l);
     b.title = l.name + (l.pinned ? ' ★' : '');
     b.addEventListener('click', async () => {
-      if (l.id === state.currentLibraryId) return;
+      if (state.libraryScope === 'current' && l.id === state.currentLibraryId) return;
+      state.libraryScope = 'current';
       await bridge.switchLibrary(l.id);
       await loadLibraries();
       await reloadLibraryView();
@@ -250,21 +267,25 @@ function renderLibraryBanner() {
   const lib = currentLibrary();
   if (!lib) { banner.classList.add('hidden'); return; }
   banner.classList.remove('hidden');
-  $('#libBannerIcon').textContent = libIcon(lib);
-  $('#libBannerName').textContent = lib.name;
+  const global = state.libraryScope === 'all';
+  banner.classList.toggle('global', global);
+  $('#libBannerIcon').textContent = global ? '🗃' : libIcon(lib);
+  $('#libBannerName').textContent = global ? t('全部已下载') : lib.name;
   const descEl = $('#libBannerDesc');
-  descEl.textContent = lib.desc || t('点击添加简介…');
-  descEl.classList.toggle('empty', !lib.desc);
+  descEl.textContent = global ? t('跨所有论文库汇总，包含尚未加入任何论文库的已下载论文。') : (lib.desc || t('点击添加简介…'));
+  descEl.classList.toggle('empty', !global && !lib.desc);
   const star = $('#libBannerStar');
+  star.classList.toggle('hidden', global);
+  $('#libBannerDelete').classList.toggle('hidden', global || state.libraries.length <= 1);
+  if (global) return;
   star.textContent = lib.pinned ? '★' : '☆';
   star.classList.toggle('on', !!lib.pinned);
-  $('#libBannerDelete').classList.toggle('hidden', state.libraries.length <= 1);
 }
 
 // banner 标题 / 简介点击内联编辑
 function startBannerEdit(kind) {
   const lib = currentLibrary();
-  if (!lib) return;
+  if (!lib || state.libraryScope === 'all') return;
   const target = kind === 'name' ? $('#libBannerName') : $('#libBannerDesc');
   if (target.dataset.editing) return;
   target.dataset.editing = '1';
@@ -300,7 +321,7 @@ const LIB_EMOJIS = ['📚', '📖', '🧠', '🤖', '🦾', '💻', '🔬', '�
 
 function openEmojiPicker() {
   const lib = currentLibrary();
-  if (!lib) return;
+  if (!lib || state.libraryScope === 'all') return;
   const picker = $('#emojiPicker');
   picker.innerHTML = '';
   for (const em of LIB_EMOJIS) {
@@ -329,9 +350,18 @@ async function reloadLibraryView() {
   await refreshData();
   await updateAnnotCounts();
   state.graphSelectedId = null;
+  state.graphLineageId = null;
   if (state.view === 'library') renderLibrary();
   else if (state.view === 'graph' && graph) applyGraphFilter();
   else { showView('library'); renderLibrary(); }
+}
+
+async function showAllPapers() {
+  state.libraryScope = 'all';
+  state.bulkMode = false;
+  state.bulkSelected.clear();
+  showView('library');
+  await reloadLibraryView();
 }
 
 // 新建论文库弹窗：选中的标志 emoji（空 = 默认 📚）
@@ -368,6 +398,7 @@ async function createLibraryFromModal() {
   if (!name) { toast(t('论文库名称，如：Transformer 精读'), true); return; }
   const lib = await bridge.createLibrary(name, $('#libDescInput').value.trim(), libModalIcon);
   if (bridge.switchLibrary) await bridge.switchLibrary(lib.id);
+  state.libraryScope = 'current';
   $('#libModal').classList.add('hidden');
   await loadLibraries();
   await reloadLibraryView();
@@ -447,7 +478,8 @@ function applyLanguage(lang) {
   setLangStorage(lang);
   applyI18n();
   const lb = $('#btnLang');
-  if (lb) lb.textContent = lang === 'en' ? '🌐 中' : '🌐 EN';
+  // 语言按钮用 🔤，地球 🌐 留给 3D 关系图入口，二者不再撞图标
+  if (lb) lb.textContent = lang === 'en' ? '🔤 中' : '🔤 EN';
   applyTheme(localStorage.getItem('pg-theme') || 'dark'); // 刷新主题按钮 title
   // 重绘动态区域
   renderLibrary();
@@ -489,6 +521,11 @@ function syncGraphModeButtons() {
     ? '拖动平移 · 滚轮缩放 · Shift 横向 · Ctrl 纵向 · 单击选中 · Shift+点击多选 · 双击打开 · Esc 返回'
     : '拖动旋转 · 滚轮缩放 · 单击选中 · Shift+点击多选 · 双击打开 · Esc 返回';
   legendTip.textContent = t(legendTip.dataset.i18n);
+  const hopTip = $('#graphHopCtl .hop-tip');
+  hopTip.dataset.i18n = state.graphViewMode === 'timeline'
+    ? 'Shift+点击可多选，高亮它们之间的全部路径'
+    : 'Shift+点击可多选，自动勾勒最短关联';
+  hopTip.textContent = t(hopTip.dataset.i18n);
   $$('[data-graph-mode]').forEach(button => {
     const active = button.dataset.graphMode === state.graphViewMode;
     button.classList.toggle('active', active);
@@ -527,9 +564,10 @@ function showView(name) {
   $('#graphView').classList.toggle('hidden', name !== 'graph');
   $('#readerView').classList.toggle('hidden', name !== 'reader');
   $('#searchWrap').style.visibility = name === 'reader' ? 'hidden' : 'visible';
+  if (name === 'reader' && state.readerPaperId) refsProgressUI.restore(state.readerPaperId);
   if (name === 'graph') {
     $('#btnGraphBack').textContent = state.graphFrom === 'reader' ? '← 继续阅读' : '← 返回论文库';
-    $('#graphMinRating').value = state.graphMinRating;
+    $('#graphMinRating').value = state.graphFilters.rating;
     syncGraphModeButtons();
     ensureGraph();
     // 等待布局后再铺数据，确保容器尺寸就绪
@@ -549,11 +587,50 @@ function syncLineageBar(lineage) {
   }
 }
 
-/* 图谱过滤：星级与单篇论文完整上下游发展史可组合，选中节点被过滤掉时清除选中 */
+function saveGraphFilters() {
+  localStorage.setItem('pg-graph-filters', JSON.stringify({
+    rating: state.graphFilters.rating,
+    authors: [...state.graphFilters.authors],
+  }));
+}
+
+function renderGraphAuthorOptions() {
+  const selected = state.graphFilters.authors;
+  const names = [...new Set([...state.papers.flatMap(p => p.authors || []).filter(Boolean), ...selected])]
+    .sort((a, b) => Number(selected.has(b)) - Number(selected.has(a)) || a.localeCompare(b));
+  const query = $('#graphAuthorSearch').value.trim().toLocaleLowerCase();
+  const box = $('#graphAuthorOptions');
+  box.replaceChildren();
+  for (const name of names.filter(x => x.toLocaleLowerCase().includes(query))) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = name;
+    input.checked = selected.has(name);
+    label.append(input, document.createTextNode(name));
+    box.appendChild(label);
+  }
+  if (!box.children.length) box.textContent = t('暂无匹配作者');
+  $('#graphAuthorSummary').textContent = selected.size
+    ? tf('作者：已选 {n} 位', { n: selected.size }) : t('作者：全部');
+  $('#graphAuthorClear').disabled = !selected.size;
+}
+
+function toggleGraphAuthor(name) {
+  const selected = state.graphFilters.authors;
+  if (selected.has(name)) selected.delete(name);
+  else selected.add(name);
+  saveGraphFilters();
+  applyGraphFilter();
+}
+
+/* 图谱多维过滤：维度间取交集，作者维度内取并集，再叠加上下游发展史 */
 function applyGraphFilter() {
   if (!graph) return;
-  const min = state.graphMinRating === 'all' ? null : parseInt(state.graphMinRating, 10);
+  const { rating, authors } = state.graphFilters;
+  const min = rating === 'all' ? null : parseInt(rating, 10);
   let papers = min === null ? [...state.papers] : state.papers.filter(p => (typeof p.rating === 'number' ? p.rating : 1) >= min);
+  if (authors.size) papers = papers.filter(p => (p.authors || []).some(a => authors.has(a)));
   let lineage = null;
   if (state.graphLineageId) {
     lineage = collectLineageIds(state.links, state.graphLineageId);
@@ -567,11 +644,13 @@ function applyGraphFilter() {
   }
   graph.setData(papers, links);
   if (state.graphSelectedId && ids.has(state.graphSelectedId)) {
-    graph.select(state.graphSelectedId);
+    // setData 已保留原有选择；只有主选中不在其中时才重新单选，避免数据刷新把多选冲掉
+    if (!graph.selectedIds.includes(state.graphSelectedId)) graph.select(state.graphSelectedId);
     showGraphSide(state.graphSelectedId, graph.selectedIds);
   }
   $('#graphHopCtl').classList.toggle('hidden', !(graph && graph.selectedIds.length));
   $('#graphEmpty').classList.toggle('hidden', papers.length > 0);
+  renderGraphAuthorOptions();
   syncTimelineControls();
   syncLineageBar(lineage);
 }
@@ -600,6 +679,9 @@ function sortPapers(papers) {
 function buildCard(p) {
   const refs = refsOf(p.id), cites = citesOf(p.id);
   const selected = state.bulkSelected.has(p.id);
+  const membership = state.libraryScope === 'all'
+    ? (p.libraryIds || []).map(id => (state.libraries.find(l => l.id === id) || {}).name).filter(Boolean)
+    : [];
   const card = document.createElement('div');
   card.className = 'card' + (selected ? ' bulk-selected' : '');
   card.dataset.paperId = p.id;
@@ -614,6 +696,7 @@ function buildCard(p) {
       ${p.doi ? `<span class="chip doi">${esc(p.doi)}</span>` : ''}
       ${(p.tags || []).map(tag => `<span class="chip">#${esc(tag)}</span>`).join('')}
     </div>
+    ${state.libraryScope === 'all' ? `<div class="meta-row card-membership">${membership.length ? membership.map(name => `<span class="chip">📚 ${esc(name)}</span>`).join('') : `<span class="chip">${t('未加入论文库')}</span>`}</div>` : ''}
     <div class="card-sub">
       ${starWidgetHtml(p)}
       <span class="stats">
@@ -759,6 +842,40 @@ function openImportModal() {
   prog.classList.add('hidden');
   prog.innerHTML = '';
   setTimeout(() => $('#importDrop').focus(), 50);
+}
+
+/* ---------------- 存储位置 ---------------- */
+async function openSettingsModal() {
+  $('#settingsModal').classList.remove('hidden');
+  $('#settingsMsg').textContent = '';
+  const info = await bridge.libInfo();
+  $('#settingsLibraryDir').textContent = info.libraryDir || '—';
+  $('#settingsLibraryDir').title = info.libraryDir || '';
+  $('#settingsDataDir').textContent = info.dataDir || '—';
+  $('#settingsDataDir').title = info.dataDir || '';
+}
+
+async function chooseStorageDirectory(kind) {
+  const buttons = [$('#btnChooseLibraryDir'), $('#btnChooseDataDir')];
+  buttons.forEach(b => { b.disabled = true; });
+  try {
+    const r = await (kind === 'library' ? bridge.chooseLibraryDir() : bridge.chooseDataDir());
+    if (!r || r.canceled) return;
+    if (!r.ok) {
+      $('#settingsMsg').textContent = r.error || t('目录更改失败');
+      $('#settingsMsg').classList.add('err');
+      return;
+    }
+    $('#settingsMsg').classList.remove('err');
+    $('#settingsMsg').textContent = kind === 'data' && r.restartRequired
+      ? t('数据已复制。请重启应用以使用新数据目录。')
+      : t('目录已更改，现有文件仍保留在原目录。');
+    const info = await bridge.libInfo();
+    $('#settingsLibraryDir').textContent = info.libraryDir || '—';
+    $('#settingsDataDir').textContent = info.dataDir || '—';
+  } finally {
+    buttons.forEach(b => { b.disabled = false; });
+  }
 }
 
 /* ---------------- 浏览器插件连接信息 ---------------- */
@@ -1129,10 +1246,14 @@ async function saveMeta() {
   toast(t('已保存论文信息'));
 }
 
+async function removePaperForScope(id) {
+  return state.libraryScope === 'all' ? bridge.purgePaper(id, true) : bridge.removePaper(id, true);
+}
+
 async function deletePaper(p) {
   if (!p) return false;
   if (!confirm(tf('确定删除《{t}》吗？\n（PDF 文件、批注、笔记和引用关联都会删除）', { t: p.title }))) return false;
-  await bridge.removePaper(p.id, true);
+  await removePaperForScope(p.id);
   return true;
 }
 
@@ -1177,7 +1298,7 @@ async function deleteBulkSelected() {
   if (!confirm(tf('确定删除选中的 {n} 篇论文吗？\n（PDF 文件、批注、笔记和引用关联都会删除，且不可恢复）', { n: ids.length }))) return;
   let ok = 0;
   for (const id of ids) {
-    try { if (await bridge.removePaper(id, true)) ok++; } catch (e) { console.warn('删除失败', id, e); }
+    try { if (await removePaperForScope(id)) ok++; } catch (e) { console.warn('删除失败', id, e); }
   }
   state.bulkSelected.clear();
   await refreshData();
@@ -1281,9 +1402,34 @@ function resolveExtToLibrary(ext) {
   return m ? m.id : null;
 }
 
+function renderDownloadFailures(paper) {
+  const wrap = $('#refsDownloadFailures');
+  const failed = (paper.externalRefs || []).filter(e => e.downloadError);
+  wrap.classList.toggle('hidden', !failed.length);
+  if (!failed.length) { wrap.open = false; return; }
+  if (wrap.dataset.paperId !== paper.id) { wrap.open = true; wrap.dataset.paperId = paper.id; }
+  $('#refsDownloadFailuresSummary').textContent = tf('⚠️ {n} 条论文尚未下载（展开查看失败原因并重试）', { n: failed.length });
+  const list = $('#refsDownloadFailuresList');
+  list.innerHTML = '';
+  for (const ext of failed) {
+    const item = document.createElement('div');
+    item.className = 'download-failure';
+    item.innerHTML = `
+      <div class="df-main">
+        <div class="df-title">${inlineMd(ext.title || '(未知标题)')}</div>
+        <div class="df-reason">${esc(ext.downloadError)}</div>
+      </div>
+      <button class="btn small df-retry">${t('↻ 重试')}</button>`;
+    const btn = item.querySelector('.df-retry');
+    btn.addEventListener('click', () => downloadOneRef(ext, btn));
+    list.appendChild(item);
+  }
+}
+
 function renderRefLists() {
   const id = state.readerPaperId;
   const paper = paperById(id) || {};
+  renderDownloadFailures(paper);
   const out = refsOf(id), inn = citesOf(id);
   const extAll = Array.isArray(paper.externalRefs) ? paper.externalRefs : [];
   const extOut = extAll.filter(e => e.dir === 'out');
@@ -1306,7 +1452,8 @@ function renderRefLists() {
         <button class="r-unlink" title="${t(unlinkTitle)}">✕</button>`;
       item.querySelector('.r-unlink').addEventListener('click', async (e) => {
         e.stopPropagation();
-        await bridge.removeLink(link.id);
+        const origins = link.libraryLinks || [{ id: link.id, libraryId: link.libraryId }];
+        for (const origin of origins) await bridge.removeLink(origin.id, origin.libraryId);
         await refreshData();
         renderRefLists();
         toast(t('已移除关联'));
@@ -1361,33 +1508,37 @@ function renderRefLists() {
 }
 
 async function downloadOneRef(ext, btn) {
+  const paperId = state.readerPaperId;
   const orig = btn.textContent;
   btn.disabled = true;
   btn.textContent = t('⏳ 下载中…');
   refsProgressUI.begin();
   let r;
-  try { r = await bridge.downloadRef(state.readerPaperId, ext.key); }
-  finally { refsProgressUI.end(); }
-  if (!r.ok) {
+  try { r = await bridge.downloadRef(paperId, ext.key); }
+  finally { refsProgressUI.end(paperId); }
+  if (!r || !r.ok) {
     btn.disabled = false;
     btn.textContent = orig;
-    refsMsg(r.error, true);
-    toast(r.error, true, 4500);
+    await afterRefsChanged(paperId);
+    const error = (r && r.error) || t('下载失败');
+    refsMsg(error, true);
+    toast(error, true, 4500);
     return null;
   }
-  await afterRefsChanged(state.readerPaperId);
+  await afterRefsChanged(paperId);
   refsMsg(`《${(r.paper.title || '').slice(0, 40)}》${t(r.duplicate ? '库中已存在，已关联' : '已下载入库（默认未评分）并建立关联')}`);
   toast(t(r.duplicate ? '已关联库内已有论文' : '下载入库成功'));
   return r;
 }
 
 async function downloadAllRefs(dir) {
+  const paperId = state.readerPaperId;
   const label = dir === 'out' ? t('参考文献') : t('被引文献');
   refsProgressUI.begin();
   let r;
-  try { r = await bridge.downloadAllRefs(state.readerPaperId, dir); }
-  finally { refsProgressUI.end(); }
-  await afterRefsChanged(state.readerPaperId);
+  try { r = await bridge.downloadAllRefs(paperId, dir); }
+  finally { refsProgressUI.end(paperId); }
+  await afterRefsChanged(paperId);
   if (!r.ok) { refsMsg(r.error, true); toast(r.error, true, 4500); return; }
   const parts = [tf('{label}：共 {t} 条待下载，成功 {d} 篇', { label, t: r.total, d: r.downloaded })];
   if (r.skipped) parts.push(tf('{n} 篇库中已存在（已关联）', { n: r.skipped }));
@@ -1407,7 +1558,7 @@ async function fetchRefsFor(paperId) {
   let r;
   try { r = await bridge.fetchRefs(paperId); }
   finally {
-    refsProgressUI.end();
+    refsProgressUI.end(paperId);
     if (graphFetchBtn) graphFetchBtn.disabled = false;
   }
   await afterRefsChanged(paperId);
@@ -1428,7 +1579,7 @@ async function fetchReferencesFor(paperId) {
   refsProgressUI.begin();
   let r;
   try { r = await bridge.fetchReferences(paperId); }
-  finally { refsProgressUI.end(); }
+  finally { refsProgressUI.end(paperId); }
   await afterRefsChanged(paperId);
   if (!r.ok) { refsMsg(r.error, true); toast(r.error, true, 5000); return; }
   const un = (r.unresolved || []).length;
@@ -1453,7 +1604,7 @@ async function fetchCitationsFor(paperId) {
   refsProgressUI.begin();
   let r;
   try { r = await bridge.fetchCitations(paperId); }
-  finally { refsProgressUI.end(); }
+  finally { refsProgressUI.end(paperId); }
   await afterRefsChanged(paperId);
   if (!r.ok) { refsMsg(r.error, true); toast(r.error, true, 5000); return; }
   refsMsg(tf('被引：共 {c} 条（来源 {s}），命中库内新增 {a} 条关联', { c: r.citeCount, s: r.source === 'semanticscholar' ? 'Semantic Scholar' : t('OpenAlex 回退'), a: r.added })
@@ -1526,6 +1677,12 @@ function renderRefsProgress(root, p) {
   item.title = [p.note, p.currentItem].filter(Boolean).join(' ');
 }
 
+function progressIsRunning(p) {
+  if (!p) return false;
+  if (p.status) return p.status === 'start' || p.active > 0 || p.pending > 0;
+  return p.running !== false;
+}
+
 const refsProgressUI = {
   active: 0,
   begin() {
@@ -1533,11 +1690,14 @@ const refsProgressUI = {
     this.setButtonsBusy(true);
     $('#refsProgress').classList.remove('hidden');
   },
-  end() {
+  end(paperId) {
     this.active = Math.max(0, this.active - 1);
+    const latest = latestRefsProgress.get(paperId);
+    if (latest) latestRefsProgress.set(paperId, { ...latest, running: false, at: Date.now() });
     if (!this.active) {
       this.setButtonsBusy(false);
-      setTimeout(() => { if (!this.active) $('#refsProgress').classList.add('hidden'); }, 1500);
+      clearTimeout(this._hideT);
+      this._hideT = setTimeout(() => { if (!this.active) $('#refsProgress').classList.add('hidden'); }, 1500);
     }
   },
   setButtonsBusy(busy) {
@@ -1549,8 +1709,15 @@ const refsProgressUI = {
   update(p) {
     $('#refsProgress').classList.remove('hidden');
     clearTimeout(this._hideT);
-    this._hideT = setTimeout(() => { if (!this.active) $('#refsProgress').classList.add('hidden'); }, 3000);
+    if (!progressIsRunning(p) && !this.active) {
+      this._hideT = setTimeout(() => { if (!this.active) $('#refsProgress').classList.add('hidden'); }, 3000);
+    }
     renderRefsProgress($('#refsProgress'), p);
+  },
+  restore(paperId) {
+    const p = latestRefsProgress.get(paperId);
+    if (p && (progressIsRunning(p) || Date.now() - (p.at || 0) < 4000)) this.update(p);
+    else $('#refsProgress').classList.add('hidden');
   },
 };
 
@@ -1560,21 +1727,23 @@ const graphRefsProgressUI = {
     root.classList.remove('hidden');
     renderRefsProgress(root, p);
     clearTimeout(this._hideT);
-    this._hideT = setTimeout(() => root.classList.add('hidden'), 4000);
+    if (!progressIsRunning(p)) this._hideT = setTimeout(() => root.classList.add('hidden'), 4000);
   },
   restore(paperId) {
     const root = $('#graphSideProgress');
     const p = latestRefsProgress.get(paperId);
-    if (p && Date.now() - (p.at || 0) < 4000) this.update(p);
+    if (p && (progressIsRunning(p) || Date.now() - (p.at || 0) < 4000)) this.update(p);
     else root.classList.add('hidden');
   },
 };
 
 function receiveRefsProgress(p) {
   if (!p || !p.paperId) return;
-  latestRefsProgress.set(p.paperId, { ...p, at: p.at || Date.now() });
-  if (state.view === 'reader' && p.paperId === state.readerPaperId) refsProgressUI.update(p);
-  if (state.view === 'graph' && p.paperId === state.graphSelectedId) graphRefsProgressUI.update(p);
+  const running = progressIsRunning(p);
+  const saved = { ...p, running, at: p.at || Date.now() };
+  latestRefsProgress.set(p.paperId, saved);
+  if (state.view === 'reader' && p.paperId === state.readerPaperId) refsProgressUI.update(saved);
+  if (state.view === 'graph' && p.paperId === state.graphSelectedId) graphRefsProgressUI.update(saved);
 }
 
 /* ---- 手动关联 ---- */
@@ -1734,27 +1903,26 @@ let graphAuthorsExpandedFor = null; // 记录当前展开作者名单的论文 i
 function renderGraphAuthors(el, p) {
   if (!el) return;
   const authors = (p.authors || []).filter(Boolean);
-  const bindToggle = (expand) => {
-    const btn = el.querySelector('.gs-auth-toggle');
-    if (!btn) return;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      graphAuthorsExpandedFor = expand ? p.id : null;
+  const buttons = (items) => items.map(a => `<button type="button" class="gs-author" data-author="${esc(a)}" aria-pressed="${state.graphFilters.authors.has(a)}" title="${t('点击筛选作者')}">${esc(a)}</button>`).join(', ');
+  el.onclick = (e) => {
+    const author = e.target.closest('.gs-author');
+    if (author) { toggleGraphAuthor(author.dataset.author); return; }
+    if (e.target.closest('.gs-auth-toggle')) {
+      graphAuthorsExpandedFor = graphAuthorsExpandedFor === p.id ? null : p.id;
       renderGraphAuthors(el, p);
-    });
+    }
   };
   if (!authors.length) { el.textContent = t('未知作者'); return; }
   if (authors.length <= 2 || graphAuthorsExpandedFor === p.id) {
     const expanded = graphAuthorsExpandedFor === p.id && authors.length > 2;
-    el.innerHTML = esc(authors.join(', '))
+    el.innerHTML = buttons(authors)
       + (expanded ? ` <button type="button" class="gs-auth-toggle">${t('收起 ▴')}</button>` : '');
-    if (expanded) bindToggle(false);
     return;
   }
   // 折叠判定：整串超过 3 行才折叠（依赖 #graphSide 已显示，否则 scrollHeight 恒为 0）
   el.textContent = authors.join(', ');
   const lineH = parseFloat(getComputedStyle(el).lineHeight) || 19;
-  if (el.scrollHeight <= lineH * 3 + 2) return;
+  if (el.scrollHeight <= lineH * 3 + 2) { el.innerHTML = buttons(authors); return; }
   let fit = 1;
   for (let i = 2; i < authors.length - 1; i++) {
     el.textContent = authors.slice(0, i).join(', ');
@@ -1762,11 +1930,10 @@ function renderGraphAuthors(el, p) {
     fit = i;
   }
   const omit = authors.length - fit - 1;
-  el.innerHTML = esc(authors.slice(0, fit).join(', '))
+  el.innerHTML = buttons(authors.slice(0, fit))
     + ` <span class="gs-auth-omit">… ${tf('等 {n} 位', { n: omit })} …</span> `
-    + esc(authors[authors.length - 1])
+    + buttons(authors.slice(-1))
     + ` <button type="button" class="gs-auth-toggle">${t('展开 ▾')}</button>`;
-  bindToggle(true);
 }
 
 /* 详情栏「相似论文」区：文献耦合 × 同被引重叠度最高的前 5 篇，点击跳转 */
@@ -1804,8 +1971,18 @@ function showGraphSide(id, selectedIds) {
   $('#graphSide').classList.remove('hidden');
   graphRefsProgressUI.restore(id);
   $('#graphSideTitle').innerHTML = inlineMd(p.title);
-  const multi = selectedIds && selectedIds.length > 1
-    ? `<div style="color:#ffd54a;margin-bottom:6px">${tf('◈ 已多选 {n} 篇，它们之间的最短关联已用轮廓高亮', { n: selectedIds.length })}</div>` : '';
+  let multi = '';
+  if (selectedIds && selectedIds.length > 1) {
+    // 网络视图勾勒最短关联；时间线视图勾勒两两之间的全部路径
+    const info = graph && graph.pathInfo;
+    let msg = tf('◈ 已多选 {n} 篇，它们之间的最短关联已用轮廓高亮', { n: selectedIds.length });
+    if (info && info.mode === 'all') {
+      msg = info.edgeCount
+        ? tf('◈ 已多选 {n} 篇，它们之间的全部路径已高亮（途经 {p} 篇论文、{e} 条引用）', { n: selectedIds.length, p: info.nodeCount, e: info.edgeCount })
+        : tf('◈ 已多选 {n} 篇，它们之间没有引用路径', { n: selectedIds.length });
+    }
+    multi = `<div class="gs-multi">${esc(msg)}</div>`;
+  }
   $('#graphSideMeta').innerHTML = multi + `
     <div id="graphSideAuthors"></div>
     <div>${[p.year, p.venue, p.doi].filter(Boolean).map(esc).join(' · ')}</div>`;
@@ -1836,6 +2013,12 @@ function bindEvents() {
   // 论文库面板：收起/展开 + 新建 + 删除确认弹窗
   $('#btnLibToggle').addEventListener('click', () => setLibSidebarCollapsed(false));
   $('#btnLibCollapse').addEventListener('click', () => setLibSidebarCollapsed(true));
+  $('#btnAllPapers').addEventListener('click', showAllPapers);
+  $('#btnAllPapersRail').addEventListener('click', showAllPapers);
+  $('#btnSettings').addEventListener('click', openSettingsModal);
+  $('#settingsClose').addEventListener('click', () => $('#settingsModal').classList.add('hidden'));
+  $('#btnChooseLibraryDir').addEventListener('click', () => chooseStorageDirectory('library'));
+  $('#btnChooseDataDir').addEventListener('click', () => chooseStorageDirectory('data'));
   // 论文库 banner：换图标 / 编辑名称简介 / 星标 / 删除
   $('#libBannerIcon').addEventListener('click', () => {
     const p = $('#emojiPicker');
@@ -1908,6 +2091,8 @@ function bindEvents() {
       localStorage.setItem('pg-graph-view-mode', state.graphViewMode);
       if (graph) graph.setViewMode(state.graphViewMode);
       syncGraphModeButtons();
+      // 多选提示随布局变化：网络 = 最短关联，时间线 = 全部路径
+      if (graph && state.graphSelectedId && paperById(state.graphSelectedId)) showGraphSide(state.graphSelectedId, graph.selectedIds);
     });
   });
   $('#graphYearSelect').addEventListener('change', (e) => {
@@ -1926,9 +2111,9 @@ function bindEvents() {
     if (!graph || !state.graphSelectedId) return;
     state.graphLineageId = state.graphSelectedId;
     state.graphViewMode = 'timeline';
-    state.graphMinRating = 'all';
+    state.graphFilters.rating = 'all';
     localStorage.setItem('pg-graph-view-mode', state.graphViewMode);
-    localStorage.setItem('pg-graph-min-rating', state.graphMinRating);
+    saveGraphFilters();
     $('#graphMinRating').value = 'all';
     graph.setViewMode('timeline');
     syncGraphModeButtons();
@@ -1939,8 +2124,17 @@ function bindEvents() {
     applyGraphFilter();
   });
   $('#graphMinRating').addEventListener('change', (e) => {
-    state.graphMinRating = e.target.value;
-    localStorage.setItem('pg-graph-min-rating', state.graphMinRating);
+    state.graphFilters.rating = e.target.value;
+    saveGraphFilters();
+    applyGraphFilter();
+  });
+  $('#graphAuthorSearch').addEventListener('input', renderGraphAuthorOptions);
+  $('#graphAuthorOptions').addEventListener('change', (e) => {
+    if (e.target.matches('input[type="checkbox"]')) toggleGraphAuthor(e.target.value);
+  });
+  $('#graphAuthorClear').addEventListener('click', () => {
+    state.graphFilters.authors.clear();
+    saveGraphFilters();
     applyGraphFilter();
   });
   // 跳数滑条
@@ -2185,6 +2379,7 @@ function bindEvents() {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       $('#importModal').classList.add('hidden');
+      $('#settingsModal').classList.add('hidden');
       $('#libModal').classList.add('hidden');
       $('#libDeleteModal').classList.add('hidden');
       $('#linkModal').classList.add('hidden');
