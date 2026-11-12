@@ -50,7 +50,7 @@ export class PdfViewer {
     const first = await this.doc.getPage(1);
     const v1 = first.getViewport({ scale: 1 });
     this.page1Width = v1.width;
-    const avail = Math.max(420, this.opts.scrollEl.clientWidth - 60);
+    const avail = Math.max(420, this.opts.scrollEl.clientWidth - 260);
     this.baseScale = avail / v1.width;
     this.scale = this.baseScale;
 
@@ -74,10 +74,19 @@ export class PdfViewer {
       badge.textContent = n + ' / ' + this.doc.numPages;
       stage.append(canvas, hlLayer, textLayerEl, iconLayer);
       wrap.append(stage, badge);
-      wrap.addEventListener('click', (ev) => this._onPageClick(ev, n, wrap));
-      this.opts.pagesEl.appendChild(wrap);
+      const row = document.createElement('div');
+      row.className = 'pdf-page-row';
+      const noteLines = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      noteLines.classList.add('pdf-note-lines');
+      const noteRail = document.createElement('div');
+      noteRail.className = 'pdf-note-rail';
+      row.append(wrap, noteRail, noteLines);
+      wrap.addEventListener('click', (ev) => {
+        if (!this._onHighlightClick(ev, n, wrap)) this._onPageClick(ev, n, wrap);
+      });
+      this.opts.pagesEl.appendChild(row);
       this.pages.push({
-        num: n, wrap, stage, canvas, hlLayer, textLayerEl, iconLayer,
+        num: n, row, wrap, stage, canvas, hlLayer, textLayerEl, iconLayer, noteRail, noteLines,
         rendered: false, rendering: false, renderScale: this.scale, renderTask: null,
       });
     }
@@ -153,6 +162,7 @@ export class PdfViewer {
     p.stage.style.width = (p.viewport1.width * renderScale) + 'px';
     p.stage.style.height = (p.viewport1.height * renderScale) + 'px';
     p.stage.style.transform = 'scale(' + (this.scale / renderScale) + ')';
+    this._renderMarginNotesFor(p);
   }
 
   /* ---------------- 正文引用：逻辑文本标记与悬浮命中 ---------------- */
@@ -310,6 +320,47 @@ export class PdfViewer {
         p.iconLayer.appendChild(icon);
       }
     }
+    this._renderMarginNotesFor(p);
+  }
+
+  _renderMarginNotesFor(p) {
+    if (!p.viewport1 || !p.noteRail) return;
+    const width = p.viewport1.width * this.scale;
+    const height = p.viewport1.height * this.scale;
+    p.row.style.width = (width + 220) + 'px';
+    p.noteRail.replaceChildren();
+    p.noteLines.replaceChildren();
+    let bottom = 0;
+    const notes = this.annotations.filter(a => a.type === 'highlight' && a.page === p.num && a.comment && a.quads?.length)
+      .map(a => ({ a, q: PdfViewer.normalizeQuads(a.quads)[0] }))
+      .filter(x => x.q)
+      .sort((x, y) => x.q.y - y.q.y);
+    for (const { a, q } of notes) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'pdf-margin-note';
+      card.textContent = a.comment;
+      card.style.borderLeftColor = /^#[0-9a-f]{6}$/i.test(a.color) ? a.color : '#ffe74a';
+      card.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.openNotePopup(a, ev.clientX, ev.clientY);
+      });
+      p.noteRail.appendChild(card);
+      const anchorY = (q.y + q.h / 2) * height;
+      const top = Math.max(8, anchorY - card.offsetHeight / 2, bottom + 8);
+      card.style.top = top + 'px';
+      bottom = top + card.offsetHeight;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const x1 = (q.x + q.w) * width;
+      const x2 = width + 16;
+      const midX = width + 8;
+      path.setAttribute('d', `M ${x1} ${anchorY} H ${midX} V ${top + card.offsetHeight / 2} H ${x2}`);
+      path.setAttribute('stroke', card.style.borderLeftColor);
+      p.noteLines.appendChild(path);
+    }
+    const rowHeight = Math.max(height, bottom + 8);
+    p.row.style.height = rowHeight + 'px';
+    p.noteLines.setAttribute('viewBox', `0 0 ${width + 220} ${rowHeight}`);
   }
 
   async _renderPage(p, token = this._renderToken, scale = this.scale) {
@@ -386,6 +437,18 @@ export class PdfViewer {
   setStickyMode(on) {
     this.stickyMode = on;
     for (const p of this.pages) p.wrap.classList.toggle('sticky-mode', on);
+  }
+
+  _onHighlightClick(ev, pageNum, wrap) {
+    if (this.stickyMode || !window.getSelection()?.isCollapsed) return false;
+    const rect = wrap.getBoundingClientRect();
+    const x = (ev.clientX - rect.left) / rect.width;
+    const y = (ev.clientY - rect.top) / rect.height;
+    const hit = [...this.annotations].reverse().find(a => a.type === 'highlight' && a.page === pageNum
+      && Array.isArray(a.quads) && a.quads.some(q => x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h));
+    if (!hit) return false;
+    this.opts.onAnnotClick && this.opts.onAnnotClick(hit, ev);
+    return true;
   }
 
   _onPageClick(ev, pageNum, wrap) {
@@ -852,7 +915,7 @@ export class PdfViewer {
   /** 适应宽度：按当前容器宽度重算基准缩放（侧栏收起/展开后同样适用） */
   async fitWidth() {
     if (this.page1Width) {
-      const avail = Math.max(420, this.opts.scrollEl.clientWidth - 60);
+      const avail = Math.max(420, this.opts.scrollEl.clientWidth - 260);
       this.baseScale = avail / this.page1Width;
     }
     this._applyScale(this.baseScale);

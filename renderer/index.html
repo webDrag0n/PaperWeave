@@ -336,6 +336,20 @@
     <button id="selCopy" data-i18n-title="复制文本" title="复制文本">⧉</button>
   </div>
 
+  <!-- 点击已有高亮时的操作菜单 -->
+  <div id="highlightMenu" class="highlight-menu hidden">
+    <div class="highlight-menu-title" data-i18n="更改高亮颜色">更改高亮颜色</div>
+    <div class="highlight-menu-colors">
+      <button class="hl-dot" type="button" data-color="#ffe74a" style="background:#ffe74a" data-i18n-title="黄色高亮" title="黄色高亮"></button>
+      <button class="hl-dot" type="button" data-color="#7bf1a8" style="background:#7bf1a8" data-i18n-title="绿色高亮" title="绿色高亮"></button>
+      <button class="hl-dot" type="button" data-color="#7ac7ff" style="background:#7ac7ff" data-i18n-title="蓝色高亮" title="蓝色高亮"></button>
+      <button class="hl-dot" type="button" data-color="#ff9ad5" style="background:#ff9ad5" data-i18n-title="粉色高亮" title="粉色高亮"></button>
+      <button class="hl-dot" type="button" data-color="#ffb27a" style="background:#ffb27a" data-i18n-title="橙色高亮" title="橙色高亮"></button>
+    </div>
+    <button id="highlightMenuComment" class="highlight-menu-action" type="button" data-i18n="添加或编辑批注">添加或编辑批注</button>
+    <button id="highlightMenuDelete" class="highlight-menu-action danger" type="button" data-i18n="删除高亮">删除高亮</button>
+  </div>
+
   <!-- 便利贴/批注编辑弹窗 -->
   <div id="notePopup" class="note-popup hidden">
     <textarea id="notePopupText" data-i18n-ph="写下你的批注…" placeholder="写下你的批注…"></textarea>

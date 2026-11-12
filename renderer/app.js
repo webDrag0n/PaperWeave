@@ -560,6 +560,7 @@ function syncTimelineControls() {
 
 function showView(name) {
   state.view = name;
+  if (name !== 'reader') $('#highlightMenu').classList.add('hidden');
   $('#libraryView').classList.toggle('hidden', name !== 'library');
   $('#graphView').classList.toggle('hidden', name !== 'graph');
   $('#readerView').classList.toggle('hidden', name !== 'reader');
@@ -1034,6 +1035,7 @@ async function openReader(paperId) {
   const paper = await bridge.getPaper(paperId);
   if (!paper) { toast(t('论文不存在'), true); return; }
   if (citationPopup) citationPopup.hide();
+  $('#highlightMenu').classList.add('hidden');
   state.readerPaperId = paperId;
   showView('reader');
   $('#readerTitle').innerHTML = inlineMd(paper.title);
@@ -1069,7 +1071,7 @@ async function openReader(paperId) {
         await bridge.saveAnnotations(state.readerPaperId, anns);
         renderAnnotList();
       },
-      onAnnotClick: (a, ev) => viewer.openNotePopup(a, ev.clientX, ev.clientY),
+      onAnnotClick: (a, ev) => openHighlightMenu(a, ev),
       onStickyPlaced: () => $('#btnStickyMode').classList.remove('on'),
       onCitationHover: (entries, point) => citationPopup.scheduleShow(entries, point),
       onCitationLeave: () => citationPopup.scheduleHide(),
@@ -1309,6 +1311,14 @@ async function deleteBulkSelected() {
 }
 
 /* ---- 批注面板 ---- */
+function openHighlightMenu(annotation, ev) {
+  const menu = $('#highlightMenu');
+  menu.dataset.annotationId = annotation.id;
+  menu.classList.remove('hidden');
+  menu.style.left = Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, ev.clientX + 8)) + 'px';
+  menu.style.top = Math.max(8, Math.min(window.innerHeight - menu.offsetHeight - 8, ev.clientY + 8)) + 'px';
+}
+
 function renderAnnotList() {
   const list = $('#annotList');
   const anns = [...state.annots].sort((a, b) => a.page - b.page || a.createdAt - b.createdAt);
@@ -2300,6 +2310,20 @@ function bindEvents() {
     $('#selPopup').classList.add('hidden');
   });
 
+  $('#highlightMenu').addEventListener('click', (e) => {
+    const menu = $('#highlightMenu');
+    const id = menu.dataset.annotationId;
+    const ann = viewer && viewer.annotations.find(a => a.id === id);
+    if (!ann) { menu.classList.add('hidden'); return; }
+    const color = e.target.closest('.hl-dot');
+    if (color) viewer.updateAnnotation(id, { color: color.dataset.color });
+    else if (e.target.closest('#highlightMenuComment')) viewer.openNotePopup(ann, e.clientX, e.clientY);
+    else if (e.target.closest('#highlightMenuDelete')) viewer.removeAnnotation(id);
+    else return;
+    menu.classList.add('hidden');
+  });
+  $('#pdfScroll').addEventListener('scroll', () => $('#highlightMenu').classList.add('hidden'));
+
   // 便利贴弹窗
   $('#notePopupSave').addEventListener('click', () => { viewer.closeNotePopup(true); renderAnnotList(); });
   $('#notePopupCancel').addEventListener('click', () => viewer.closeNotePopup(false));
@@ -2414,6 +2438,7 @@ function bindEvents() {
 
   // 点击其他地方隐藏选中弹条
   window.addEventListener('mousedown', (e) => {
+    if (!$('#highlightMenu').contains(e.target) && !e.target.closest('.hl-box')) $('#highlightMenu').classList.add('hidden');
     if (!$('#selPopup').contains(e.target) && !e.target.closest('.note-popup')) {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed) $('#selPopup').classList.add('hidden');

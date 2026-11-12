@@ -191,6 +191,8 @@ Semantic Scholar 请求经过独立的串行节流（间隔约 1.1 秒）和 429
 
 打开论文时渲染进程请求 `refs:citationIndex`，主进程根据 `refText`、库内论文与 `externalRefs` 构建索引，每条包含编号、作者姓氏、年份和匹配结果（库内 / 未入库 / 仅原文）。`PdfViewer` 在文本层上识别 `[1]`、`[1–3]`、`Author et al. (2017)` 等标记并命中索引，由 `CitationPopup` 展示。整个过程不联网。设计细节见 [引用悬浮设计](superpowers/specs/2026-11-04-citation-hover-design.md)。
 
+PDF 高亮点击由 `PdfViewer` 按页面百分比坐标命中，`app.js` 展示改色、批注与删除菜单。带文字批注的高亮在每页右侧的批注区生成卡片和 SVG 引线；缩放或重绘时根据同一组百分比坐标重新定位，不新增持久化字段。
+
 ### 5.6 图谱、相似度与发现
 
 - `GraphView` 有两种布局：`network` 为手写三维力导向布局；`timeline` 为二维年份布局，节点坐标由 `computeTimelineLayout` 计算，禁用旋转。两种模式共用节点、连线、标签与拾取逻辑。

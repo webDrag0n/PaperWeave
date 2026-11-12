@@ -51,7 +51,7 @@ The app UI switches between Chinese and English (🔤 button in the top bar, pre
 
 - **PDF reading**: multi-page rendering, lazy rendering for long documents, smooth Ctrl+wheel zoom centered on the pointer, ↔ fit-width, ← → page navigation, text selection & copy
 - **Outline sidebar**: a slim left rail expands into a translucent outline panel; clicking an entry **jumps precisely to the section heading** (outline dest coordinates + title-text-line fallback)
-- **Highlights**: popup toolbar on selection, 5 colors, optional text comments; highlights and search matches render as text backgrounds without obscuring or recoloring the text; "📌 Sticky notes" can be placed anywhere on a page
+- **Highlights**: a selection toolbar offers 5 colors and comments; click an existing highlight to recolor it, add or edit a comment, or delete it. Comments appear in the page margin with a line to the highlighted text. Highlights and search matches remain text backgrounds; "📌 Sticky notes" can be placed anywhere on a page
 - **In-text citation hover cards**: hover a `[1]` or author–year citation in the body text to see the matching reference; open it directly if it is in the library, or download it if it is not
 - **Notes**: per-paper Markdown notes with edit/preview toggle and auto-save
 - **Reading experience**: per-paper reading position memory (restored on reopen); collapsible side panel for focus reading; 🌙 eye-care mode; ☀️ light / dark themes (graph palette follows the theme)

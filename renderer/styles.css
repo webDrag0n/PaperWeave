@@ -218,6 +218,17 @@ select option { background: var(--bg3); color: var(--text); }
   transition: background .2s ease; overflow-anchor: none;
 }
 #pdfPages { display: flex; flex-direction: column; align-items: center; gap: 14px; overflow-anchor: none; }
+.pdf-page-row { position: relative; flex: 0 0 auto; display: flex; align-items: flex-start; }
+.pdf-note-rail { position: relative; flex: 0 0 220px; height: 100%; z-index: 6; }
+.pdf-margin-note {
+  position: absolute; left: 16px; width: 196px; max-height: 130px; overflow-y: auto;
+  padding: 9px 10px; border: 1px solid var(--line); border-left: 3px solid var(--yellow);
+  border-radius: 7px; background: var(--bg2); color: var(--text); box-shadow: var(--shadow-pop);
+  text-align: left; font: inherit; font-size: 12px; line-height: 1.5; cursor: pointer; overflow-wrap: anywhere;
+}
+.pdf-margin-note:hover { border-color: var(--accent); }
+.pdf-note-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; overflow: visible; }
+.pdf-note-lines path { fill: none; stroke-width: 1.5; }
 .pdf-page {
   position: relative; flex: 0 0 auto; background: #fff; box-shadow: 0 3px 14px rgba(0,0,0,.45);
   overflow-anchor: none;
@@ -795,6 +806,17 @@ select option { background: var(--bg3); color: var(--text); }
 .sel-popup button { border: none; background: none; cursor: pointer; font-size: 15px; color: var(--text); }
 .sel-popup .hl-dot { width: 20px; height: 20px; }
 .sel-popup button:hover { transform: scale(1.2); }
+.highlight-menu {
+  position: fixed; z-index: 205; width: 210px; padding: 9px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow-pop); color: var(--text);
+}
+.highlight-menu-title { font-size: 11px; color: var(--text-dim); margin-bottom: 7px; }
+.highlight-menu-colors { display: flex; gap: 7px; margin-bottom: 8px; }
+.highlight-menu-colors .hl-dot { width: 24px; height: 24px; }
+.highlight-menu-action { display: block; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.highlight-menu-action:hover { background: var(--bg-hover); }
+.highlight-menu-action.danger { color: var(--danger); }
 
 .note-popup {
   position: fixed; z-index: 210; width: 300px; background: var(--bg3);

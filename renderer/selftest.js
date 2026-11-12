@@ -179,6 +179,32 @@ export async function runSelftest(ctx) {
     const hlBoxes = document.querySelectorAll('.hl-box').length;
     check('高亮渲染到页面', hlBoxes >= 1, 'boxes=' + hlBoxes);
     check('高亮图层作为文字背景混合而非覆盖文字', getComputedStyle(viewer.pages[0].hlLayer).mixBlendMode === 'multiply' && getComputedStyle(viewer.pages[0].textLayerEl).mixBlendMode === 'multiply');
+    check('有批注的高亮在页边显示卡片与引线', !!viewer.pages[0].noteRail.querySelector('.pdf-margin-note') && !!viewer.pages[0].noteLines.querySelector('path'));
+    window.getSelection().removeAllRanges();
+    const highlightRect = viewer.pages[0].wrap.getBoundingClientRect();
+    const highlightClick = () => viewer.pages[0].wrap.dispatchEvent(new MouseEvent('click', {
+      bubbles: true, clientX: highlightRect.left + highlightRect.width * 0.3,
+      clientY: highlightRect.top + highlightRect.height * 0.115,
+    }));
+    highlightClick();
+    check('点击已有高亮打开操作菜单', !document.querySelector('#highlightMenu').classList.contains('hidden'));
+    document.querySelector('#highlightMenu .hl-dot[data-color="#7bf1a8"]').click();
+    check('菜单更改高亮颜色', viewer.annotations.find(a => a.id === 'a_test_hl').color === '#7bf1a8');
+    highlightClick();
+    document.querySelector('#highlightMenuComment').click();
+    check('菜单打开批注编辑框', !document.querySelector('#notePopup').classList.contains('hidden'));
+    document.querySelector('#notePopupText').value = '更新批注';
+    document.querySelector('#notePopupSave').click();
+    check('编辑批注同步页边卡片', viewer.pages[0].noteRail.querySelector('.pdf-margin-note')?.textContent === '更新批注');
+    check('批注引线指向页边卡片', !!viewer.pages[0].noteLines.querySelector('path[d]'));
+    viewer.annotations.push({ id: 'a_test_delete', type: 'highlight', page: 1,
+      quads: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.02 }], color: '#ffe74a', text: '待删除', comment: '', createdAt: Date.now() });
+    viewer._renderAnnotations();
+    viewer.pages[0].wrap.dispatchEvent(new MouseEvent('click', { bubbles: true,
+      clientX: highlightRect.left + highlightRect.width * 0.2,
+      clientY: highlightRect.top + highlightRect.height * 0.21 }));
+    document.querySelector('#highlightMenuDelete').click();
+    check('菜单删除高亮', !viewer.annotations.some(a => a.id === 'a_test_delete'));
 
     // ---------- 5.5 鼠标中心平滑缩放：页面、文字与高亮必须共享同一坐标系 ----------
     await viewer.jumpToPage(1, 'auto');
