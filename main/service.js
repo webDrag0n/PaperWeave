@@ -524,7 +524,65 @@ function createService(store, opts = {}) {
     });
   }
 
-  return { importOnePdfBuffer, importFromPaths, importFromUrl, importFromUrls, fetchRefs, fetchReferences, fetchCitations, autoMatch, downloadRef, downloadAllRefs, resolveImport, readPaperPages, findPaperText };
+  const PACKAGE_FORMAT = 'paperweave-annotation-package';
+  const PACKAGE_PAPER_FIELDS = ['title', 'authors', 'year', 'doi', 'abstract', 'venue', 'tags', 'notes', 'rating', 'favorite', 'lastPage'];
+
+  async function exportAnnotationPackage(paperId, annotations) {
+    const paper = store.getPaper(paperId);
+    if (!paper) throw new Error('论文不存在');
+    const file = store.paperFilePath(paper);
+    if (!file || !fs.existsSync(file)) throw new Error('找不到 PDF 文件');
+    const metadata = {};
+    for (const key of PACKAGE_PAPER_FIELDS) if (paper[key] !== undefined) metadata[key] = paper[key];
+    return {
+      format: PACKAGE_FORMAT,
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      paper: metadata,
+      fileName: (String(paper.title || 'paper').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120) || 'paper') + '.pdf',
+      annotations: Array.isArray(annotations) ? annotations : store.getAnnotations(paperId),
+      pdfBase64: fs.readFileSync(file).toString('base64'),
+    };
+  }
+
+  async function importAnnotationPackageBuffer(buf) {
+    const bytes = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+    if (bytes.length > 512 * 1024 * 1024) throw new Error('批注包超过 512 MB 限制');
+    let pkg;
+    try { pkg = JSON.parse(bytes.toString('utf8')); }
+    catch (_) { throw new Error('不是有效的 PaperWeave 批注包'); }
+    if (!pkg || pkg.format !== PACKAGE_FORMAT || pkg.version !== 1 || !pkg.paper || typeof pkg.pdfBase64 !== 'string' || !Array.isArray(pkg.annotations)) {
+      throw new Error('不是有效的 PaperWeave 批注包');
+    }
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(pkg.pdfBase64)) throw new Error('批注包中的 PDF 数据无效');
+    const pdf = Buffer.from(pkg.pdfBase64, 'base64');
+    if (pdf.length < 5 || pdf.subarray(0, 5).toString('latin1') !== '%PDF-') throw new Error('批注包中的 PDF 数据无效');
+    const result = await importOnePdfBuffer(pdf, String(pkg.fileName || 'paper.pdf'), { conflictPolicy: 'merge' });
+    if (!result.paper) return result;
+    const paperId = result.paper.id;
+    const metadata = {};
+    for (const key of PACKAGE_PAPER_FIELDS) {
+      const value = pkg.paper[key];
+      if (['authors', 'tags'].includes(key)) {
+        if (Array.isArray(value)) metadata[key] = value.filter(x => typeof x === 'string');
+      } else if (['rating', 'lastPage'].includes(key)) {
+        if (Number.isFinite(value)) metadata[key] = value;
+      } else if (key === 'favorite') {
+        if (typeof value === 'boolean') metadata[key] = value;
+      } else if (typeof value === 'string' || (key === 'year' && Number.isFinite(value))) {
+        metadata[key] = String(value);
+      }
+    }
+    store.updatePaper(paperId, metadata);
+    const merged = new Map(store.getAnnotations(paperId).filter(a => a && typeof a.id === 'string').map(a => [a.id, a]));
+    for (const ann of pkg.annotations.slice(0, 10000)) {
+      if (ann && typeof ann.id === 'string' && ['highlight', 'sticky'].includes(ann.type)) merged.set(ann.id, ann);
+    }
+    store.setAnnotations(paperId, [...merged.values()]);
+    return { ...result, ok: true, paper: pub(store.getPaper(paperId)), annotationCount: merged.size };
+  }
+
+  return { importOnePdfBuffer, importFromPaths, importFromUrl, importFromUrls, fetchRefs, fetchReferences, fetchCitations, autoMatch, downloadRef, downloadAllRefs, resolveImport, readPaperPages, findPaperText, exportAnnotationPackage, importAnnotationPackageBuffer };
 }
 
 module.exports = { createService };

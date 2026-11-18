@@ -87,6 +87,7 @@
                 <option value="added" data-i18n="最新添加">最新添加</option>
                 <option value="year" data-i18n="年份（新→旧）">年份（新→旧）</option>
                 <option value="title" data-i18n="标题 A→Z">标题 A→Z</option>
+                <option value="author" data-i18n="作者 A→Z">作者 A→Z</option>
                 <option value="links" data-i18n="引用关联最多">引用关联最多</option>
               </select>
             </label>
@@ -220,6 +221,7 @@
             <button class="hl-dot" data-color="#ffb27a" style="background:#ffb27a"></button>
           </div>
           <button class="btn" id="btnStickyMode" data-i18n="📌 便利贴" data-i18n-title="在页面上放置便利贴" title="在页面上放置便利贴">📌 便利贴</button>
+          <button class="icon-btn wide" id="btnExportPackage" data-i18n-title="导出 PDF 与批注包" title="导出 PDF 与批注包">⇪</button>
           <button class="icon-btn wide" id="btnTogglePanel" data-i18n-title="收起 / 展开右侧面板" title="收起 / 展开右侧面板">⇥</button>
         </div>
       </div>
@@ -302,12 +304,24 @@
               <span><span data-i18n="📤 本文引用的（参考文献）">📤 本文引用的（参考文献）</span><span class="badge" id="refOutCount">0</span></span>
               <button class="btn small hidden" id="btnDlAllOut" data-i18n="⏬ 全部下载" data-i18n-title="一键下载全部未入库参考文献（arXiv / 开放获取来源）" title="一键下载全部未入库参考文献（arXiv / 开放获取来源）">⏬ 全部下载</button>
             </h4>
+            <div class="ref-panel-controls">
+              <input id="refOutSearch" type="search" data-i18n-ph="搜索参考文献…" placeholder="搜索参考文献…">
+              <select id="refOutSort" data-i18n-title="参考文献排序" title="参考文献排序">
+                <option value="year" data-i18n="按时间排序">按时间排序</option><option value="author" data-i18n="按作者首字母排序">按作者首字母排序</option><option value="title" data-i18n="按标题首字母排序">按标题首字母排序</option>
+              </select>
+            </div>
             <div id="refOutList" class="ref-list"></div>
             <div id="refOutExt" class="ref-list ext"></div>
             <h4 class="ref-h">
               <span><span data-i18n="📥 引用本文的（被引）">📥 引用本文的（被引）</span><span class="badge" id="refInCount">0</span></span>
               <button class="btn small hidden" id="btnDlAllIn" data-i18n="⏬ 全部下载" data-i18n-title="一键下载全部未入库被引文献（arXiv / 开放获取来源）" title="一键下载全部未入库被引文献（arXiv / 开放获取来源）">⏬ 全部下载</button>
             </h4>
+            <div class="ref-panel-controls">
+              <input id="refInSearch" type="search" data-i18n-ph="搜索被引论文…" placeholder="搜索被引论文…">
+              <select id="refInSort" data-i18n-title="被引论文排序" title="被引论文排序">
+                <option value="year" data-i18n="按时间排序">按时间排序</option><option value="author" data-i18n="按作者首字母排序">按作者首字母排序</option><option value="title" data-i18n="按标题首字母排序">按标题首字母排序</option>
+              </select>
+            </div>
             <div id="refInList" class="ref-list"></div>
             <div id="refInExt" class="ref-list ext"></div>
           </div>
@@ -332,6 +346,7 @@
     <button class="hl-dot" data-color="#ffb27a" style="background:#ffb27a" data-i18n-title="橙色高亮" title="橙色高亮"></button>
     <span class="sep"></span>
     <button id="selComment" data-i18n-title="高亮并添加批注" title="高亮并添加批注">💬</button>
+    <button id="selSearch" data-i18n-title="在本文中搜索选中文字" title="在本文中搜索选中文字">🔍</button>
     <button id="selCopy" data-i18n-title="复制文本" title="复制文本">⧉</button>
   </div>
 
@@ -351,7 +366,13 @@
 
   <!-- 便利贴/批注编辑弹窗 -->
   <div id="notePopup" class="note-popup hidden">
-    <textarea id="notePopupText" data-i18n-ph="写下你的批注…" placeholder="写下你的批注…"></textarea>
+    <div class="note-popup-toolbar">
+      <button class="btn small btn-primary" id="notePopupEdit" data-i18n="编辑">编辑</button>
+      <button class="btn small" id="notePopupPreview" data-i18n="预览">预览</button>
+      <span class="notes-hint" data-i18n="支持 Markdown">支持 Markdown</span>
+    </div>
+    <textarea id="notePopupText" data-i18n-ph="写下你的批注…（支持 Markdown）" placeholder="写下你的批注…（支持 Markdown）"></textarea>
+    <div id="notePopupMarkdown" class="markdown hidden"></div>
     <div class="note-popup-actions">
       <button class="btn small btn-danger" id="notePopupDelete" data-i18n="删除">删除</button>
       <span class="flex-spacer"></span>
@@ -376,6 +397,8 @@
       <textarea id="urlInput" rows="3" placeholder="https://arxiv.org/abs/1706.03762&#10;https://example.org/paper.pdf"></textarea>
       <div id="urlProgress" class="url-progress hidden"></div>
       <div class="modal-actions">
+        <button class="btn" id="btnImportPackage" data-i18n="导入批注包">导入批注包</button>
+        <span class="flex-spacer"></span>
         <button class="btn" id="importCancel" data-i18n="取消">取消</button>
         <button class="btn btn-primary" id="importGo" data-i18n="开始导入">开始导入</button>
       </div>

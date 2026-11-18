@@ -96,6 +96,10 @@ export async function runSelftest(ctx) {
     await viewer.flashMatches(searchRes[0].page);
     await sleep(200);
     check('搜索命中临时高亮', document.querySelectorAll('.hl-box.search-hit').length > 0);
+    viewer._boundPopup = { text: '  attention\n', pageNum: 1, quads: [] };
+    document.querySelector('#selSearch').click();
+    await sleep(400);
+    check('选中文字可直接发起文内搜索', document.querySelector('#sideSearchInput').value === 'attention' && document.querySelector('#searchResults .search-hit-item') && document.querySelector('.tab[data-tab="search"]').classList.contains('active'));
     const outlineTxt = document.querySelector('#outlineList').textContent.trim();
     check('目录面板渲染（无大纲时给提示）', outlineTxt.length > 0);
     document.querySelector('#btnOutline').click();
@@ -131,6 +135,25 @@ export async function runSelftest(ctx) {
     check('未入库条目提供下载按钮', !!document.querySelector('#refOutExt .ext-dl'));
     check('全部下载按钮可见', !document.querySelector('#btnDlAllOut').classList.contains('hidden'));
     check('引用计数含未入库数', document.querySelector('#refOutCount').textContent.includes('+1'), document.querySelector('#refOutCount').textContent);
+    const refInSearch = document.querySelector('#refInSearch');
+    refInSearch.value = 'BERT';
+    refInSearch.dispatchEvent(new Event('input'));
+    check('被引面板搜索过滤', document.querySelectorAll('#refInList .ref-item').length === 1 && document.querySelector('#refInList').textContent.includes('BERT'));
+    refInSearch.value = '';
+    refInSearch.dispatchEvent(new Event('input'));
+    const refInSort = document.querySelector('#refInSort');
+    refInSort.value = 'title';
+    refInSort.dispatchEvent(new Event('change'));
+    const refTitles = [...document.querySelectorAll('#refInList .r-title')].map(el => el.textContent);
+    check('引用按标题首字母排序', state.refSort === 'title' && refTitles.every((title, i) => i === 0 || refTitles[i - 1].localeCompare(title, 'zh', { sensitivity: 'base' }) <= 0), refTitles.join(' | '));
+    refInSort.value = 'author';
+    refInSort.dispatchEvent(new Event('change'));
+    const refAuthors = [...document.querySelectorAll('#refInList .r-sub')].map(el => el.textContent.split(' · ')[0]);
+    check('引用按作者首字母排序', state.refSort === 'author' && refAuthors.every((author, i) => i === 0 || refAuthors[i - 1].localeCompare(author, 'zh', { sensitivity: 'base' }) <= 0), refAuthors.join(' | '));
+    refInSort.value = 'year';
+    refInSort.dispatchEvent(new Event('change'));
+    const refYears = [...document.querySelectorAll('#refInList .r-sub')].map(el => Number(el.textContent.match(/\b(?:19|20)\d{2}\b/)?.[0] || -1));
+    check('引用按时间排序', state.refSort === 'year' && refYears.every((year, i) => i === 0 || refYears[i - 1] >= year), refYears.join(','));
     const failurePanel = document.querySelector('#refsDownloadFailures');
     check('无开放获取 PDF 的失败列表置顶并默认展开', !failurePanel.classList.contains('hidden') && failurePanel.open && failurePanel.textContent.includes('未找到开放获取的 PDF'));
     const originalRetryDownload = bridge.downloadRef;
@@ -181,6 +204,9 @@ export async function runSelftest(ctx) {
     check('高亮渲染到页面', hlBoxes >= 1, 'boxes=' + hlBoxes);
     check('高亮图层作为文字背景混合而非覆盖文字', getComputedStyle(viewer.pages[0].hlLayer).mixBlendMode === 'multiply' && getComputedStyle(viewer.pages[0].textLayerEl).mixBlendMode === 'multiply');
     check('有批注的高亮在页边显示卡片与引线', !!viewer.pages[0].noteRail.querySelector('.pdf-margin-note') && !!viewer.pages[0].noteLines.querySelector('path'));
+    const noteUnderline = viewer.pages[0].hlLayer.querySelector('.annotation-underline');
+    check('文字批注使用下划线而非整块底色', !!noteUnderline && noteUnderline.getBoundingClientRect().height <= 3);
+    check('批注包导入导出入口存在', !!document.querySelector('#btnExportPackage') && !!document.querySelector('#btnImportPackage'));
     window.getSelection().removeAllRanges();
     const highlightRect = viewer.pages[0].wrap.getBoundingClientRect();
     const highlightClick = () => viewer.pages[0].wrap.dispatchEvent(new MouseEvent('click', {
@@ -194,10 +220,53 @@ export async function runSelftest(ctx) {
     highlightClick();
     document.querySelector('#highlightMenuComment').click();
     check('菜单打开批注编辑框', !document.querySelector('#notePopup').classList.contains('hidden'));
-    document.querySelector('#notePopupText').value = '更新批注';
+    document.querySelector('#notePopupText').value = '**更新批注**\n\n- Markdown 要点';
+    document.querySelector('#notePopupPreview').click();
+    check('批注编辑器支持 Markdown 预览', !!document.querySelector('#notePopupMarkdown strong') && !!document.querySelector('#notePopupMarkdown li'));
     document.querySelector('#notePopupSave').click();
-    check('编辑批注同步页边卡片', viewer.pages[0].noteRail.querySelector('.pdf-margin-note')?.textContent === '更新批注');
-    check('批注引线指向页边卡片', !!viewer.pages[0].noteLines.querySelector('path[d]'));
+    const updatedMarginNote = viewer.pages[0].noteRail.querySelector('.pdf-margin-note');
+    check('编辑批注同步页边卡片并渲染 Markdown', updatedMarginNote?.textContent.includes('更新批注') && !!updatedMarginNote?.querySelector('strong') && !!updatedMarginNote?.querySelector('li'));
+    check('批注引线从下划线指向页边卡片', !!viewer.pages[0].noteLines.querySelector('path[d]'));
+    document.querySelector('.tab[data-tab="annots"]').click();
+    check('批注列表渲染 Markdown', !!document.querySelector('#annotList .a-comment strong'));
+    const laneAnnotations = [
+      { id: 'a_test_lane_1', type: 'highlight', page: 1, quads: [{ x: 0.1, y: 0.1, w: 0.5, h: 0.03 }], color: '#7ac7ff', text: '重叠批注一', comment: '重叠批注一', createdAt: Date.now() },
+      { id: 'a_test_lane_2', type: 'highlight', page: 1, quads: [{ x: 0.1, y: 0.1, w: 0.5, h: 0.03 }], color: '#ff9ad5', text: '重叠批注二', comment: '重叠批注二', createdAt: Date.now() },
+    ];
+    viewer.annotations.push(...laneAnnotations);
+    viewer._renderAnnotations();
+    const laneBoxes = [...viewer.pages[0].hlLayer.querySelectorAll('.annotation-underline')].map(b => b.getBoundingClientRect());
+    let laneOverlap = 0;
+    for (let i = 0; i < laneBoxes.length; i++) for (let j = i + 1; j < laneBoxes.length; j++) {
+      const a = laneBoxes[i], b = laneBoxes[j];
+      if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.2) laneOverlap++;
+    }
+    check('重合批注下划线自动分配独立轨道', laneBoxes.length >= 3 && laneOverlap === 0, 'overlaps=' + laneOverlap);
+    const leaderSegments = [...viewer.pages[0].noteLines.querySelectorAll('path')].map(path => {
+      const n = path.getAttribute('d').match(/M\s+([\d.-]+)\s+([\d.-]+)\s+H\s+([\d.-]+)\s+V\s+([\d.-]+)\s+H\s+([\d.-]+)/).slice(1).map(Number);
+      return [
+        { x1: n[0], y1: n[1], x2: n[2], y2: n[1] },
+        { x1: n[2], y1: n[1], x2: n[2], y2: n[3] },
+        { x1: n[2], y1: n[3], x2: n[4], y2: n[3] },
+      ];
+    });
+    const leadersCross = (a, b) => {
+      const av = a.x1 === a.x2, bv = b.x1 === b.x2;
+      if (av && bv) return Math.abs(a.x1 - b.x1) < 0.1 && Math.min(Math.max(a.y1, a.y2), Math.max(b.y1, b.y2)) - Math.max(Math.min(a.y1, a.y2), Math.min(b.y1, b.y2)) > 0.1;
+      if (!av && !bv) return Math.abs(a.y1 - b.y1) < 0.1 && Math.min(Math.max(a.x1, a.x2), Math.max(b.x1, b.x2)) - Math.max(Math.min(a.x1, a.x2), Math.min(b.x1, b.x2)) > 0.1;
+      const v = av ? a : b, h = av ? b : a;
+      return v.x1 > Math.min(h.x1, h.x2) + 0.1 && v.x1 < Math.max(h.x1, h.x2) - 0.1 && h.y1 > Math.min(v.y1, v.y2) + 0.1 && h.y1 < Math.max(v.y1, v.y2) - 0.1;
+    };
+    let leaderCrossings = 0;
+    for (let i = 0; i < leaderSegments.length; i++) for (let j = i + 1; j < leaderSegments.length; j++) {
+      for (const a of leaderSegments[i]) for (const b of leaderSegments[j]) if (leadersCross(a, b)) leaderCrossings++;
+    }
+    check('页边引线无交叉或共用线段', leaderSegments.length >= 3 && leaderCrossings === 0, 'crossings=' + leaderCrossings);
+    for (const ann of laneAnnotations) {
+      const index = viewer.annotations.findIndex(a => a.id === ann.id);
+      if (index >= 0) viewer.annotations.splice(index, 1);
+    }
+    viewer._renderAnnotations();
     viewer.annotations.push({ id: 'a_test_delete', type: 'highlight', page: 1,
       quads: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.02 }], color: '#ffe74a', text: '待删除', comment: '', createdAt: Date.now() });
     viewer._renderAnnotations();
@@ -541,6 +610,17 @@ export async function runSelftest(ctx) {
     check('3D 图谱构建', graph && graph.nodes.length === 6, 'nodes=' + (graph && graph.nodes.length));
     check('图谱边数量与链接一致', graph && graph.edges.length === state.links.length, `edges=${graph && graph.edges.length} links=${state.links.length}`);
 
+    const graphSearchInput = document.querySelector('#searchInput');
+    graphSearchInput.value = 'transformer';
+    graphSearchInput.dispatchEvent(new Event('input'));
+    await sleep(150);
+    check('图谱搜索高亮全部匹配节点', graph.searchMatchedIds.size >= 2 && graph.nodes.filter(n => graph.searchMatchedIds.has(n.id)).every(n => n.mesh.material.color.getHex() === 0xffd54a && n.mesh.material.opacity === 1), 'matches=' + graph.searchMatchedIds.size);
+    check('图谱搜索弱化未匹配节点', graph.nodes.filter(n => !graph.searchMatchedIds.has(n.id)).every(n => n.mesh.material.opacity < 1));
+    graphSearchInput.value = '';
+    graphSearchInput.dispatchEvent(new Event('input'));
+    await sleep(100);
+    check('清空图谱搜索恢复节点', graph.searchMatchedIds.size === 0 && graph.nodes.every(n => n.mesh.material.opacity === 1));
+
     // ---------- 9.0 网络 / 时间线布局切换 ----------
     const timelineBtn = document.querySelector('[data-graph-mode="timeline"]');
     const networkBtn = document.querySelector('[data-graph-mode="network"]');
@@ -554,6 +634,23 @@ export async function runSelftest(ctx) {
       check('同年节点纵向避让', graph.nodes.every((a, i) => graph.nodes.every((b, j) => i === j || String(a.paper.year) !== String(b.paper.year) || Math.abs(a.pos.y - b.pos.y) >= 18)));
       const yearRuler = document.querySelector('#graphTimelineRuler');
       check('年份参考线与固定字号标尺已创建', graph.timelineColumns.length > 0 && graph.timelineGroup.children.length === graph.timelineColumns.length && yearRuler && yearRuler.children.length === graph.timelineColumns.length && getComputedStyle(yearRuler.children[0]).fontSize === '14px');
+      const rulerCameraX = graph.camera.position.x, rulerTargetX = graph.controls.target.x;
+      graph.camera.position.x += 23;
+      graph.controls.target.x += 23;
+      graph.controls.update();
+      graph._positionTimelineRuler();
+      const rulerCanvasRect = graph.renderer.domElement.getBoundingClientRect();
+      const rulerBounds = yearRuler.getBoundingClientRect();
+      const rulerErrors = graph.timelineColumns.map((column, index) => {
+        const point = graph.camera.position.clone().set(column.x * graph.timelineScale.x, graph.timelineLabelY * graph.timelineScale.y, 0).project(graph.camera);
+        const expected = (point.x * 0.5 + 0.5) * rulerCanvasRect.width + rulerCanvasRect.left - rulerBounds.left;
+        return Math.abs(parseFloat(yearRuler.children[index].style.left) - expected);
+      });
+      check('时间线平移后刻度与参考线保持对齐', rulerErrors.every(error => error < 0.05), 'maxErr=' + Math.max(...rulerErrors).toFixed(4));
+      graph.camera.position.x = rulerCameraX;
+      graph.controls.target.x = rulerTargetX;
+      graph.controls.update();
+      graph._positionTimelineRuler();
       check('时间线禁止三维旋转', graph.controls.enableRotate === false);
       check('时间线操作提示使用二维平移', document.querySelector('#graphLegend .legend-tip').textContent.includes('拖动平移'));
       check('切换布局保留选中状态', graph.selectedIds.includes(attention.id));
@@ -673,9 +770,18 @@ export async function runSelftest(ctx) {
       }
       await bridge.selftestShot('04-graph-timeline');
       networkBtn.click();
-      await sleep(350);
+      await sleep(800);
       check('切回网络模式并恢复三维布局', graph.viewMode === 'network' && graph.controls.enableRotate === true && graph.timelineGroup.children.length === 0 && graph.nodes.some(n => Math.abs(n.pos.z) > 0.01));
       check('切回网络仍保留选中状态', graph.selectedIds.includes(attention.id));
+      const centroid = graph.nodes.reduce((sum, node) => sum.add(node.pos), graph.camera.position.clone().set(0, 0, 0)).multiplyScalar(1 / graph.nodes.length);
+      check('图谱旋转目标位于全部节点质心', graph.controls.target.distanceTo(centroid) < 0.01, graph.controls.target.toArray().map(v => v.toFixed(2)).join(','));
+      const graphBounds = graph.renderer.domElement.getBoundingClientRect();
+      graph.camera.updateMatrixWorld();
+      const graphPoints = graph.nodes.flatMap(n => [n.pos, n.label.position]).map(point => point.clone().project(graph.camera));
+      check('图谱适配后节点与标签不被边界截断', graphPoints.every(point => point.z >= -1 && point.z <= 1 && point.x >= -1 && point.x <= 1 && point.y >= -1 && point.y <= 1), 'points=' + graphPoints.length);
+      graph.controls.target.copy(attention.id ? graph.nodes[0].pos : centroid);
+      graph._centerNetworkRotation();
+      check('拖动旋转前重新对齐节点质心', graph.controls.target.distanceTo(centroid) < 0.01);
       graph.select(null);
     }
 
@@ -742,6 +848,21 @@ export async function runSelftest(ctx) {
     check('单条 BibTeX 复制按钮齐全', document.querySelectorAll('#graphSide .gs-bib').length === refsN + citesN0);
     check('分区批量复制按钮齐全', document.querySelectorAll('#graphSide .gs-bib-all').length === (refsN ? 1 : 0) + (citesN0 ? 1 : 0));
     check('条目含标题与作者', !!document.querySelector('#graphSide .gs-item-title') && !!document.querySelector('#graphSide .gs-item-sub'));
+    const graphRefSearch = document.querySelector('#graphSideCites .gs-ref-controls input');
+    graphRefSearch.value = 'BERT';
+    graphRefSearch.dispatchEvent(new Event('input'));
+    check('图谱引用面板搜索过滤', document.querySelectorAll('#graphSideCites .gs-item').length === 1 && document.querySelector('#graphSideCites').textContent.includes('BERT'));
+    const graphRefSort = document.querySelector('#graphSideCites .gs-ref-controls select');
+    graphRefSort.value = 'title';
+    graphRefSort.dispatchEvent(new Event('change'));
+    const graphRefTitles = [...document.querySelectorAll('#graphSideCites .gs-item-title')].map(el => el.textContent);
+    check('图谱引用面板排序与搜索状态保留', state.refSort === 'title' && graphRefTitles.every((title, i) => i === 0 || graphRefTitles[i - 1].localeCompare(title, 'zh', { sensitivity: 'base' }) <= 0) && document.querySelector('#graphSideCites .gs-ref-controls input').value === 'BERT', graphRefTitles.join(' | '));
+    const graphRefSearchReset = document.querySelector('#graphSideCites .gs-ref-controls input');
+    graphRefSearchReset.value = '';
+    graphRefSearchReset.dispatchEvent(new Event('input'));
+    const graphRefSortReset = document.querySelector('#graphSideCites .gs-ref-controls select');
+    graphRefSortReset.value = 'year';
+    graphRefSortReset.dispatchEvent(new Event('change'));
     // 跳数滑条调到 1：2 跳的 ResNet 应变灰
     const hopRange = document.querySelector('#hopRange');
     hopRange.value = '1';
@@ -903,7 +1024,7 @@ export async function runSelftest(ctx) {
     // ---------- 11. 搜索 ----------
     state.search = 'bert';
     renderLibrary();
-    check('库内搜索过滤', document.querySelectorAll('#libraryGrid .card').length === 1);
+    check('库内搜索过滤且保留分区', document.querySelectorAll('#libraryGrid .card').length === 1 && document.querySelector('#libraryGrid .card').closest('.rating-section'));
     state.search = '';
     renderLibrary();
     check('论文库卡片提供删除按钮', document.querySelectorAll('#libraryGrid .card [data-act="del"]').length === state.papers.length);
@@ -940,7 +1061,17 @@ export async function runSelftest(ctx) {
     await sleep(250);
     const firstCard = document.querySelector('#libraryGrid .card h3');
     check('按标题排序', !!firstCard && /An Image is Worth/i.test(firstCard.textContent), firstCard && firstCard.textContent);
-    check('排序后无分区', document.querySelectorAll('#libraryGrid .rating-section').length === 0);
+    check('标题首字母分区且区内排序', document.querySelectorAll('#libraryGrid .rating-section').length >= 2 && document.querySelectorAll('#libraryGrid > .card').length === 0 && document.querySelector('#libraryGrid .rating-section').dataset.group === 'A');
+    for (const mode of ['added', 'year', 'author', 'links']) {
+      sortSel.value = mode;
+      sortSel.dispatchEvent(new Event('change'));
+      await sleep(120);
+      check(`论文库 ${mode} 排序保持分区与区内排序`, document.querySelectorAll('#libraryGrid .rating-section').length > 0 && document.querySelectorAll('#libraryGrid > .card').length === 0 && [...document.querySelectorAll('#libraryGrid .card')].every(card => card.closest('.rating-section')), 'sections=' + document.querySelectorAll('#libraryGrid .rating-section').length);
+    }
+    sortSel.value = 'year';
+    sortSel.dispatchEvent(new Event('change'));
+    const yearHeads = [...document.querySelectorAll('#libraryGrid .rating-section')].map(section => section.dataset.group).filter(key => key !== 'unknown').map(Number);
+    check('发表年份分区按新到旧排列', yearHeads.every((year, i) => i === 0 || yearHeads[i - 1] >= year), yearHeads.join(','));
     sortSel.value = 'rating';
     sortSel.dispatchEvent(new Event('change'));
     await sleep(250);

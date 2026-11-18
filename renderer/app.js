@@ -34,6 +34,8 @@ const state = {
   bulkMode: false,
   bulkSelected: new Set(),
   sort: localStorage.getItem('pg-sort') || 'rating',
+  refSort: ['year', 'author', 'title'].includes(localStorage.getItem('pg-ref-sort')) ? localStorage.getItem('pg-ref-sort') : 'year',
+  refSearches: {},
   graphFrom: 'library',
   graphViewMode: localStorage.getItem('pg-graph-view-mode') === 'timeline' ? 'timeline' : 'network',
   graphFilters: loadGraphFilters(),
@@ -644,6 +646,7 @@ function applyGraphFilter() {
     $('#graphSide').classList.add('hidden');
   }
   graph.setData(papers, links);
+  graph.setSearchQuery(state.search);
   if (state.graphSelectedId && ids.has(state.graphSelectedId)) {
     // setData 已保留原有选择；只有主选中不在其中时才重新单选，避免数据刷新把多选冲掉
     if (!graph.selectedIds.includes(state.graphSelectedId)) graph.select(state.graphSelectedId);
@@ -669,11 +672,12 @@ function starWidgetHtml(p) {
 function sortPapers(papers) {
   const arr = [...papers];
   switch (state.sort) {
-    case 'added': return arr.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
-    case 'year': return arr.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0) || (b.addedAt || 0) - (a.addedAt || 0));
-    case 'title': return arr.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'en'));
-    case 'links': return arr.sort((a, b) => (refsOf(b.id).length + citesOf(b.id).length) - (refsOf(a.id).length + citesOf(a.id).length));
-    default: return arr.sort((a, b) => (b.favorite - a.favorite) || (b.addedAt - a.addedAt));
+    case 'added': return arr.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0) || refTextCompare(a.title, b.title));
+    case 'year': return arr.sort((a, b) => (parseInt(b.year) || 0) - (parseInt(a.year) || 0) || refTextCompare(a.title, b.title));
+    case 'title': return arr.sort((a, b) => refTextCompare(a.title || '￿', b.title || '￿'));
+    case 'author': return arr.sort((a, b) => refTextCompare((a.authors || [])[0] || '￿', (b.authors || [])[0] || '￿') || refTextCompare(a.title, b.title));
+    case 'links': return arr.sort((a, b) => (refsOf(b.id).length + citesOf(b.id).length) - (refsOf(a.id).length + citesOf(a.id).length) || refTextCompare(a.title, b.title));
+    default: return arr.sort((a, b) => (b.favorite - a.favorite) || (b.addedAt - a.addedAt) || refTextCompare(a.title, b.title));
   }
 }
 
@@ -759,6 +763,52 @@ const RATING_SECTIONS = [
   [2, '★★ 一般'], [1, '★ 默认'], [0, '☆ 未评分（多为引用自动下载）'],
 ];
 
+function initialGroupOf(value) {
+  const cleaned = String(value || '').replace(/[*_`~[\]()]/g, '').trim();
+  const match = cleaned.match(/[A-Za-z0-9一-鿿]/);
+  return match ? match[0].toLocaleUpperCase() : '#';
+}
+function libraryGroupDescriptor(p) {
+  if (state.sort === 'added') {
+    const year = p.addedAt ? new Date(p.addedAt).getFullYear() : null;
+    return { key: year || 'unknown', label: year ? tf('添加于 {year} 年', { year }) : t('未记录添加时间'), order: year || -1 };
+  }
+  if (state.sort === 'year') {
+    const year = /^(?:19|20)\d{2}$/.test(String(p.year || '')) ? Number(p.year) : null;
+    return { key: year || 'unknown', label: year ? String(year) : t('未知年份'), order: year || -1 };
+  }
+  if (state.sort === 'title' || state.sort === 'author') {
+    const initial = initialGroupOf(state.sort === 'title' ? p.title : (p.authors || [])[0]);
+    return { key: initial, label: initial === '#' ? t('#（无首字母）') : initial, order: initial };
+  }
+  if (state.sort === 'links') {
+    const count = refsOf(p.id).length + citesOf(p.id).length;
+    return { key: count, label: tf('{n} 条引用关联', { n: count }), order: count };
+  }
+  const rating = ratingOf(p);
+  const section = RATING_SECTIONS.find(([r]) => r === rating) || RATING_SECTIONS[RATING_SECTIONS.length - 1];
+  return { key: rating, label: t(section[1]), order: rating };
+}
+function groupLibraryPapers(papers) {
+  const groups = new Map();
+  for (const p of papers) {
+    const descriptor = libraryGroupDescriptor(p);
+    if (!groups.has(descriptor.key)) groups.set(descriptor.key, { ...descriptor, papers: [] });
+    groups.get(descriptor.key).papers.push(p);
+  }
+  const result = [...groups.values()];
+  result.sort((a, b) => {
+    if (state.sort === 'title' || state.sort === 'author') {
+      if (a.key === '#') return 1;
+      if (b.key === '#') return -1;
+      return refTextCompare(a.key, b.key);
+    }
+    if (state.sort === 'rating') return b.order - a.order;
+    return b.order - a.order;
+  });
+  return result;
+}
+
 function renderLibrary() {
   renderLibraryBanner();
   const grid = $('#libraryGrid');
@@ -769,7 +819,7 @@ function renderLibrary() {
   $('#libraryEmpty').classList.toggle('hidden', state.papers.length > 0);
   $('#libraryToolbar').classList.toggle('hidden', state.papers.length === 0);
   grid.innerHTML = '';
-  grid.classList.toggle('flat', state.sort !== 'rating');
+  grid.classList.remove('flat');
 
   // 库统计条
   const favCount = state.papers.filter(p => p.favorite).length;
@@ -780,26 +830,21 @@ function renderLibrary() {
   const sel = $('#sortSelect');
   if (sel && sel.value !== state.sort) sel.value = state.sort;
 
-  if (state.sort === 'rating' && !q) {
-    // 默认：按星级分区（收藏置顶仅在各区内部生效）
-    for (const [r, label] of RATING_SECTIONS) {
-      const group = papers.filter(p => ratingOf(p) === r);
-      if (!group.length) continue;
-      const section = document.createElement('div');
-      section.className = 'rating-section';
-      section.dataset.rating = r;
-      const head = document.createElement('div');
-      head.className = 'rating-head';
-      head.innerHTML = `<span class="rating-title">${esc(t(label))}</span><span class="rating-count">${tf('{n} 篇', { n: group.length })}</span>`;
-      const body = document.createElement('div');
-      body.className = 'grid';
-      for (const p of sortPapers(group)) body.appendChild(buildCard(p));
-      section.append(head, body);
-      grid.appendChild(section);
-    }
-  } else {
-    for (const p of sortPapers(papers)) grid.appendChild(buildCard(p));
+  for (const group of groupLibraryPapers(papers)) {
+    const section = document.createElement('div');
+    section.className = 'rating-section';
+    section.dataset.group = group.key;
+    if (state.sort === 'rating') section.dataset.rating = group.key;
+    const head = document.createElement('div');
+    head.className = 'rating-head';
+    head.innerHTML = `<span class="rating-title">${esc(group.label)}</span><span class="rating-count">${tf('{n} 篇', { n: group.papers.length })}</span>`;
+    const body = document.createElement('div');
+    body.className = 'grid';
+    for (const p of sortPapers(group.papers)) body.appendChild(buildCard(p));
+    section.append(head, body);
+    grid.appendChild(section);
   }
+  if (!papers.length && state.papers.length) grid.innerHTML = `<div class="ref-empty">${t('没有匹配的论文。')}</div>`;
 }
 
 async function updateAnnotCounts() {
@@ -843,6 +888,36 @@ function openImportModal() {
   prog.classList.add('hidden');
   prog.innerHTML = '';
   setTimeout(() => $('#importDrop').focus(), 50);
+}
+
+async function exportCurrentPackage() {
+  if (!state.readerPaperId || !viewer) return;
+  const button = $('#btnExportPackage');
+  button.disabled = true;
+  try {
+    if (!$('#notePopup').classList.contains('hidden')) viewer.closeNotePopup(true);
+    const result = await bridge.exportAnnotationPackage(state.readerPaperId, state.annots);
+    if (!result || result.canceled) return;
+    if (!result.ok) { toast(t('批注包导出失败：') + (result.error || ''), true); return; }
+    toast(tf('已导出 PDF 与 {n} 条批注', { n: result.annotationCount || 0 }));
+  } catch (e) { toast(t('批注包导出失败：') + e.message, true); }
+  finally { button.disabled = false; }
+}
+
+async function importAnnotationPackage() {
+  const button = $('#btnImportPackage');
+  button.disabled = true;
+  try {
+    const result = await bridge.importAnnotationPackage();
+    if (!result || result.canceled) return;
+    if (!result.ok || !result.paper) { toast(t('批注包导入失败：') + (result.error || ''), true); return; }
+    await refreshData();
+    await updateAnnotCounts();
+    $('#importModal').classList.add('hidden');
+    await openReader(result.paper.id);
+    toast(tf('已还原 PDF 与 {n} 条批注', { n: result.annotationCount || 0 }));
+  } catch (e) { toast(t('批注包导入失败：') + e.message, true); }
+  finally { button.disabled = false; }
 }
 
 /* ---------------- 存储位置 ---------------- */
@@ -1339,12 +1414,13 @@ function renderAnnotList() {
         <span class="a-page">${tf('第 {n} 页', { n: a.page })}</span>
       </div>
       ${a.text ? `<div class="a-text">“${esc(a.text)}”</div>` : ''}
-      ${a.comment ? `<div class="a-comment">💬 ${esc(a.comment)}</div>` : ''}`;
+      ${a.comment ? `<div class="a-comment markdown"><span class="a-comment-icon">💬</span>${renderMarkdown(a.comment)}</div>` : ''}`;
     item.querySelector('.a-del').addEventListener('click', (e) => {
       e.stopPropagation();
       viewer.removeAnnotation(a.id);
     });
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return;
       if (a.type === 'sticky') viewer.scrollToAnnotation({ ...a, text: '', comment: '' });
       viewer.scrollToAnnotation(a);
       viewer.openNotePopup(a, window.innerWidth - 340, 140);
@@ -1436,21 +1512,62 @@ function renderDownloadFailures(paper) {
   }
 }
 
+function refPaperOf(item) { return item.paper || item; }
+function refTextCompare(a, b) { return String(a || '').localeCompare(String(b || ''), getLang() === 'en' ? 'en' : 'zh', { numeric: true, sensitivity: 'base' }); }
+function sortReferenceItems(items) {
+  return [...items].sort((a, b) => {
+    const pa = refPaperOf(a), pb = refPaperOf(b);
+    if (state.refSort === 'author') {
+      return refTextCompare((pa.authors || [])[0] || '￿', (pb.authors || [])[0] || '￿') || refTextCompare(pa.title, pb.title);
+    }
+    if (state.refSort === 'title') return refTextCompare(pa.title || '￿', pb.title || '￿') || refTextCompare((pa.authors || [])[0], (pb.authors || [])[0]);
+    const ya = /^(?:19|20)\d{2}$/.test(String(pa.year || '')) ? Number(pa.year) : -1;
+    const yb = /^(?:19|20)\d{2}$/.test(String(pb.year || '')) ? Number(pb.year) : -1;
+    return yb - ya || refTextCompare(pa.title, pb.title);
+  });
+}
+function filterReferenceItems(items, key) {
+  const q = String(state.refSearches[key] || '').trim().toLocaleLowerCase();
+  if (!q) return items;
+  return items.filter(item => {
+    const p = refPaperOf(item);
+    return [p.title, (p.authors || []).join(' '), p.year, p.venue, p.doi].join(' ').toLocaleLowerCase().includes(q);
+  });
+}
+function refSortOptionsHtml() {
+  return `<option value="year" data-i18n="按时间排序">${t('按时间排序')}</option><option value="author" data-i18n="按作者首字母排序">${t('按作者首字母排序')}</option><option value="title" data-i18n="按标题首字母排序">${t('按标题首字母排序')}</option>`;
+}
+function updateRefSort(mode) {
+  if (!['year', 'author', 'title'].includes(mode)) return;
+  state.refSort = mode;
+  localStorage.setItem('pg-ref-sort', mode);
+  if (state.view === 'reader') renderRefLists();
+  if (state.view === 'graph' && state.graphSelectedId) showGraphSide(state.graphSelectedId, graph ? graph.selectedIds : []);
+}
+
 function renderRefLists() {
   const id = state.readerPaperId;
   const paper = paperById(id) || {};
   renderDownloadFailures(paper);
-  const out = refsOf(id), inn = citesOf(id);
+  const outAll = refsOf(id), innAll = citesOf(id);
+  const out = sortReferenceItems(filterReferenceItems(outAll, 'refOut'));
+  const inn = sortReferenceItems(filterReferenceItems(innAll, 'refIn'));
   const extAll = Array.isArray(paper.externalRefs) ? paper.externalRefs : [];
-  const extOut = extAll.filter(e => e.dir === 'out');
-  const extIn = extAll.filter(e => e.dir === 'in');
+  const extOutAll = extAll.filter(e => e.dir === 'out');
+  const extInAll = extAll.filter(e => e.dir === 'in');
+  const extOut = sortReferenceItems(filterReferenceItems(extOutAll, 'refOut'));
+  const extIn = sortReferenceItems(filterReferenceItems(extInAll, 'refIn'));
+  $('#refOutSearch').value = state.refSearches.refOut || '';
+  $('#refInSearch').value = state.refSearches.refIn || '';
+  $('#refOutSort').value = state.refSort;
+  $('#refInSort').value = state.refSort;
   const extSuffix = (n) => n ? (getLang() === 'en' ? ` +${n} external` : ` +${n} 未入库`) : '';
-  $('#refOutCount').textContent = out.length + extSuffix(extOut.length);
-  $('#refInCount').textContent = inn.length + extSuffix(extIn.length);
-  const fill = (el, arr, unlinkTitle) => {
+  $('#refOutCount').textContent = outAll.length + extSuffix(extOutAll.length);
+  $('#refInCount').textContent = innAll.length + extSuffix(extInAll.length);
+  const fill = (el, arr, unlinkTitle, total) => {
     el.innerHTML = '';
     if (!arr.length) {
-      el.innerHTML = `<div class="ref-empty">${t('库内暂无关联论文。试试「抓取引用」或「离线匹配」。')}</div>`;
+      el.innerHTML = `<div class="ref-empty">${t(total ? '没有匹配的引用。' : '库内暂无关联论文。试试「抓取引用」或「离线匹配」。')}</div>`;
       return;
     }
     for (const { link, paper } of arr) {
@@ -1472,13 +1589,16 @@ function renderRefLists() {
       el.appendChild(item);
     }
   };
-  fill($('#refOutList'), out, '移除这条引用关联');
-  fill($('#refInList'), inn, '移除这条引用关联');
+  fill($('#refOutList'), out, '移除这条引用关联', outAll.length);
+  fill($('#refInList'), inn, '移除这条引用关联', innAll.length);
 
   // 未入库引用条目：可单篇下载入库，也可一键全部下载
-  const fillExt = (el, arr) => {
+  const fillExt = (el, arr, total) => {
     el.innerHTML = '';
-    if (!arr.length) return;
+    if (!arr.length) {
+      if (total) el.innerHTML = `<div class="ref-empty">${t('没有匹配的引用。')}</div>`;
+      return;
+    }
     const head = document.createElement('div');
     head.className = 'ext-head';
     head.textContent = tf('◌ 未入库 {n} 条（可下载入库，自动建立关联）', { n: arr.length });
@@ -1511,10 +1631,10 @@ function renderRefLists() {
       el.appendChild(item);
     }
   };
-  fillExt($('#refOutExt'), extOut);
-  fillExt($('#refInExt'), extIn);
-  $('#btnDlAllOut').classList.toggle('hidden', !extOut.length);
-  $('#btnDlAllIn').classList.toggle('hidden', !extIn.length);
+  fillExt($('#refOutExt'), extOut, extOutAll.length);
+  fillExt($('#refInExt'), extIn, extInAll.length);
+  $('#btnDlAllOut').classList.toggle('hidden', !extOutAll.length);
+  $('#btnDlAllIn').classList.toggle('hidden', !extInAll.length);
 }
 
 async function downloadOneRef(ext, btn) {
@@ -1856,7 +1976,7 @@ async function copyText(text, okMsg) {
 
 /* ---------------- 图谱右侧详情栏 ---------------- */
 // 引用 / 被引分区：默认前 3 条，可展开全部；支持整区与单条复制 BibTeX
-function buildRelationSection(container, arr, label, color, onJump) {
+function buildRelationSection(container, arr, label, color, onJump, searchKey) {
   container.innerHTML = '';
   const head = document.createElement('div');
   head.className = 'gs-rel-head';
@@ -1878,10 +1998,23 @@ function buildRelationSection(container, arr, label, color, onJump) {
     list.innerHTML = '<div class="cnt">—</div>';
     return;
   }
+  const controls = document.createElement('div');
+  controls.className = 'ref-panel-controls gs-ref-controls';
+  controls.innerHTML = `<input type="search" placeholder="${t('搜索当前引用面板…')}" data-i18n-ph="搜索当前引用面板…"><select title="${t('引用排序')}">${refSortOptionsHtml()}</select>`;
+  container.insertBefore(controls, list);
+  const search = controls.querySelector('input');
+  const sort = controls.querySelector('select');
+  search.value = state.refSearches[searchKey] || '';
+  sort.value = state.refSort;
   let expanded = false;
   const renderItems = () => {
+    const filtered = sortReferenceItems(filterReferenceItems(arr, searchKey));
     list.innerHTML = '';
-    for (const x of (expanded ? arr : arr.slice(0, 3))) {
+    if (!filtered.length) {
+      list.innerHTML = `<div class="cnt">${t('没有匹配的引用。')}</div>`;
+      return;
+    }
+    for (const x of (expanded ? filtered : filtered.slice(0, 3))) {
       const item = document.createElement('div');
       item.className = 'gs-item';
       item.innerHTML = `
@@ -1897,14 +2030,16 @@ function buildRelationSection(container, arr, label, color, onJump) {
       item.addEventListener('click', () => onJump && onJump(x.paper.id));
       list.appendChild(item);
     }
-    if (arr.length > 3) {
+    if (filtered.length > 3) {
       const tg = document.createElement('button');
       tg.className = 'gs-expand';
-      tg.textContent = expanded ? t('收起 ▴') : tf('展开全部 {n} 篇 ▾', { n: arr.length });
+      tg.textContent = expanded ? t('收起 ▴') : tf('展开全部 {n} 篇 ▾', { n: filtered.length });
       tg.addEventListener('click', () => { expanded = !expanded; renderItems(); });
       list.appendChild(tg);
     }
   };
+  search.addEventListener('input', () => { state.refSearches[searchKey] = search.value; renderItems(); });
+  sort.addEventListener('change', () => updateRefSort(sort.value));
   renderItems();
 }
 
@@ -2005,8 +2140,8 @@ function showGraphSide(id, selectedIds) {
     state.graphSelectedId = pid;
     showGraphSide(pid, graph.selectedIds);
   };
-  buildRelationSection($('#graphSideRefs'), refs, t('📤 它引用的：'), '#4aa3ff', jump);
-  buildRelationSection($('#graphSideCites'), cites, t('📥 引用它的：'), '#ff7a4a', jump);
+  buildRelationSection($('#graphSideRefs'), refs, t('📤 它引用的：'), '#4aa3ff', jump, 'graphRefs');
+  buildRelationSection($('#graphSideCites'), cites, t('📥 引用它的：'), '#ff7a4a', jump, 'graphCites');
   buildSimilarSection($('#graphSideSim'), id, jump);
   if (extN) {
     const ext = document.createElement('div');
@@ -2156,18 +2291,13 @@ function bindEvents() {
   $('#searchInput').addEventListener('input', (e) => {
     state.search = e.target.value;
     if (state.view === 'library') renderLibrary();
-    if (state.view === 'graph' && graph) {
-      const q = state.search.trim().toLowerCase();
-      if (q) {
-        const hit = graph.nodes.map(n => n.paper).find(p => (p.title || '').toLowerCase().includes(q));
-        if (hit) { graph.focusNode(hit.id); graph.select(hit.id); showGraphSide(hit.id); state.graphSelectedId = hit.id; }
-      }
-    }
+    if (state.view === 'graph' && graph) graph.setSearchQuery(state.search);
   });
 
   // 统一导入弹窗：链接 + 拖文件 + 选文件
   $('#importCancel').addEventListener('click', () => $('#importModal').classList.add('hidden'));
   $('#importGo').addEventListener('click', runImport);
+  $('#btnImportPackage').addEventListener('click', importAnnotationPackage);
   $('#importDrop').addEventListener('click', async () => {
     // 点击区域打开文件管理器选择
     const r = await bridge.importDialog();
@@ -2195,6 +2325,7 @@ function bindEvents() {
 
   // 阅读器
   $('#btnBackLib').addEventListener('click', () => { showView('library'); renderLibrary(); });
+  $('#btnExportPackage').addEventListener('click', exportCurrentPackage);
   $('#zoomIn').addEventListener('click', async () => { await viewer.zoom(1.2); updateZoomLabel(); });
   $('#zoomOut').addEventListener('click', async () => { await viewer.zoom(1 / 1.2); updateZoomLabel(); });
   $('#btnFitWidth').addEventListener('click', async () => { await viewer.fitWidth(); updateZoomLabel(); toast(t('已适应页面宽度'), false, 1200); });
@@ -2300,6 +2431,15 @@ function bindEvents() {
     viewer.createHighlightFromSelection(viewer.hlColor, true);
     renderAnnotList();
   });
+  $('#selSearch').addEventListener('click', async () => {
+    const text = String(viewer._boundPopup?.text || window.getSelection()?.toString() || '').trim().replace(/\s+/g, ' ');
+    if (!text) return;
+    $('#sideSearchInput').value = text;
+    $('#selPopup').classList.add('hidden');
+    window.getSelection()?.removeAllRanges();
+    switchTab('search');
+    await runSearch();
+  });
   $('#selCopy').addEventListener('click', async () => {
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) {
@@ -2324,6 +2464,16 @@ function bindEvents() {
   $('#pdfScroll').addEventListener('scroll', () => $('#highlightMenu').classList.add('hidden'));
 
   // 便利贴弹窗
+  const setNotePopupMode = (mode) => {
+    const preview = mode === 'preview';
+    $('#notePopupText').classList.toggle('hidden', preview);
+    $('#notePopupMarkdown').classList.toggle('hidden', !preview);
+    $('#notePopupEdit').classList.toggle('btn-primary', !preview);
+    $('#notePopupPreview').classList.toggle('btn-primary', preview);
+    if (preview) $('#notePopupMarkdown').innerHTML = renderMarkdown($('#notePopupText').value) || `<span class="note-empty">${t('暂无批注')}</span>`;
+  };
+  $('#notePopupEdit').addEventListener('click', () => setNotePopupMode('edit'));
+  $('#notePopupPreview').addEventListener('click', () => setNotePopupMode('preview'));
   $('#notePopupSave').addEventListener('click', () => { viewer.closeNotePopup(true); renderAnnotList(); });
   $('#notePopupCancel').addEventListener('click', () => viewer.closeNotePopup(false));
   $('#notePopupDelete').addEventListener('click', () => { viewer.deleteNoteEditing(); renderAnnotList(); });
@@ -2342,6 +2492,13 @@ function bindEvents() {
   $('#notesEditor').addEventListener('input', onNotesInput);
 
   // 引用
+  for (const key of ['refOut', 'refIn']) {
+    $('#' + key + 'Search').addEventListener('input', (e) => {
+      state.refSearches[key] = e.target.value;
+      renderRefLists();
+    });
+    $('#' + key + 'Sort').addEventListener('change', (e) => updateRefSort(e.target.value));
+  }
   $('#btnFetchReferences').addEventListener('click', () => fetchReferencesFor(state.readerPaperId));
   $('#btnFetchCitations').addEventListener('click', () => fetchCitationsFor(state.readerPaperId));
   $('#btnAutoMatch').addEventListener('click', () => autoMatchFor(state.readerPaperId));

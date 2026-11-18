@@ -221,6 +221,31 @@ function registerIpc() {
 
   ipcMain.handle('ann:list', (e, paperId) => store.getAnnotations(paperId));
   ipcMain.handle('ann:save', (e, paperId, anns) => store.setAnnotations(paperId, anns));
+  ipcMain.handle('ann:exportPackage', async (e, paperId, anns) => {
+    try {
+      const paper = store.getPaper(paperId);
+      if (!paper) return { ok: false, error: '论文不存在' };
+      const r = await dialog.showSaveDialog(mainWindow, {
+        title: '导出 PDF 与批注包',
+        defaultPath: (paper.title || 'paper').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120) + '.pwpackage',
+        filters: [{ name: 'PaperWeave 批注包', extensions: ['pwpackage'] }],
+      });
+      if (r.canceled || !r.filePath) return { canceled: true };
+      const pkg = await service.exportAnnotationPackage(paperId, anns);
+      fs.writeFileSync(r.filePath, JSON.stringify(pkg));
+      return { ok: true, path: r.filePath, annotationCount: pkg.annotations.length };
+    } catch (err) { return { ok: false, error: err.message }; }
+  });
+  ipcMain.handle('ann:importPackage', async () => {
+    const r = await dialog.showOpenDialog(mainWindow, {
+      title: '导入 PaperWeave 批注包',
+      filters: [{ name: 'PaperWeave 批注包', extensions: ['pwpackage', 'json'] }],
+      properties: ['openFile'],
+    });
+    if (r.canceled || !r.filePaths.length) return { canceled: true };
+    try { return await service.importAnnotationPackageBuffer(fs.readFileSync(r.filePaths[0])); }
+    catch (err) { return { ok: false, error: err.message }; }
+  });
 
   ipcMain.handle('links:list', () => store.listLinks());
   ipcMain.handle('links:listAll', () => store.listAllLinks());

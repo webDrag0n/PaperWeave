@@ -51,7 +51,8 @@ The app UI switches between Chinese and English (🔤 button in the top bar, pre
 
 - **PDF reading**: multi-page rendering, lazy rendering for long documents, smooth Ctrl+wheel zoom centered on the pointer, ↔ fit-width, ← → page navigation, text selection & copy
 - **Outline sidebar**: a slim left rail expands into a translucent outline panel; clicking an entry **jumps precisely to the section heading** (outline dest coordinates + title-text-line fallback)
-- **Highlights**: a selection toolbar offers 5 colors and comments; click an existing highlight to recolor it, add or edit a comment, or delete it. Comments appear in the page margin with a line to the highlighted text. Highlights and search matches remain text backgrounds; "📌 Sticky notes" can be placed anywhere on a page
+- **Highlights**: a selection toolbar offers 5 colors and Markdown comments; commented text is marked with a colored underline linked to its Markdown margin card. Click an existing highlight to recolor it, edit the comment, or delete it; "📌 Sticky notes" can be placed anywhere on a page
+- **In-paper search & annotation packages**: search selected text with one click or use Ctrl+F for full-text results. Export a `.pwpackage` containing the original PDF, metadata and all annotations from the reader, then restore it from the import dialog; annotations merge with existing ones by ID
 - **In-text citation hover cards**: hover a `[1]` or author–year citation in the body text to see the matching reference; open it directly if it is in the library, or download it if it is not
 - **Notes**: per-paper Markdown notes with edit/preview toggle and auto-save
 - **Reading experience**: per-paper reading position memory (restored on reopen); collapsible side panel for focus reading; 🌙 eye-care mode; ☀️ light / dark themes (graph palette follows the theme)
@@ -68,7 +69,7 @@ The app UI switches between Chinese and English (🔤 button in the top bar, pre
 - **Smart dedupe**: content-hash hits are reused directly; same DOI (possibly different versions) or very similar titles trigger a **confirmation dialog** — reuse the existing paper or import as new
 - **Automatic metadata**: title / authors / DOI / abstract / references section extracted on import; publication years prefer arXiv ids and explicit publication markers instead of arbitrary four-digit numbers in the body
 - **Importance rating**: 1–5 stars right on the card; manual imports default to 1 star, citation-downloaded papers default to unrated
-- **Rating sections & sorting**: grouped by rating by default (★★★★★ → ☆ unrated); sortable by recency / year / title / link count
+- **Sections & sorting**: grouped by rating by default, or by year added, publication year, title initial, author initial, or citation count, with sorting inside every section; search results retain the same sections
 - Search, tags, favorites, bulk management; **titles support inline Markdown** (`**bold**`, `*italic*`, `` `code` ``, `~~strike~~`)
 
 ![Library](README.assets/01-library.png)
@@ -76,7 +77,7 @@ The app UI switches between Chinese and English (🔤 button in the top bar, pre
 
 ### 🌐 Citation graph & timeline
 
-- Force-directed 3D graph; all paper labels always visible (inline-Markdown aware); node glow; smooth camera transitions
+- Force-directed 3D graph with persistent labels, node glow and smooth camera transitions; the top search highlights every matching node, timeline ticks stay aligned while panning, and rotation stays centered on the node centroid
 - **Hop-depth slider** (1–5, default 2): 🟡 selected paper, neighbors colored per hop (blue/orange/purple/green/pink), nodes beyond N hops stay gray
 - **Shift+click multi-select**: the network view outlines shortest paths, while the timeline highlights all citation paths between selected papers (without overriding hop colors); hop distance is measured from the nearest selected node
 - **2D timeline view**: papers laid out by publication year, with unknown years in their own column; wheel zooms both axes, Shift zooms horizontally, Ctrl zooms vertically

@@ -15,6 +15,7 @@ function makeStore(withSource = false) {
   fs.mkdirSync(libraryDir, { recursive: true });
   const papers = [];
   const links = [];
+  const annotations = {};
   const externalRefs = samples.map((_, i) => ({
     key: 'arxiv:' + ['1706.03762', '1810.04805', '2005.14165', '2010.11929'][i],
     arxivId: ['1706.03762', '1810.04805', '2005.14165', '2010.11929'][i],
@@ -23,9 +24,11 @@ function makeStore(withSource = false) {
   }));
   if (withSource) papers.push({ id: 'source', title: 'Source paper', doi: '', authors: [], externalRefs, refText: '', file: '', hash: 'source' });
   return {
-    papers, links, libraryDir,
+    papers, links, annotations, libraryDir,
     get data() { return { papers, links }; },
     currentLibraryId() { return 'lib'; },
+    getAnnotations(id) { return annotations[id] || []; },
+    setAnnotations(id, anns) { annotations[id] = anns; return anns; },
     getPaper(id) { return papers.find(p => p.id === id) || null; },
     findByHash(hash) { return papers.find(p => p.hash === hash) || null; },
     findByDoi(doi) {
@@ -178,14 +181,48 @@ function trackingFetch() {
   assert.equal(splitReferenceEntries(legacyRefText || '').length, legacyCase.entries);
   console.log('PASS 旧论文抓取前从本地 PDF 重建参考文献');
 
+  const packageStore = makeStore();
+  const packageService = createService(packageStore, { fetch: trackingFetch().fetch });
+  const packageImport = await packageService.importOnePdfBuffer(samples[0], 'attention.pdf', { conflictPolicy: 'new' });
+  const packageId = packageImport.paper.id;
+  packageStore.updatePaper(packageId, { notes: '**还原笔记**' });
+  packageStore.setAnnotations(packageId, [
+    { id: 'ann-md', type: 'highlight', page: 1, quads: [{ x: 0.1, y: 0.1, w: 0.4, h: 0.03 }], text: 'Attention', comment: '**重点**', color: '#ffe74a', createdAt: 1 },
+    { id: 'ann-sticky', type: 'sticky', page: 2, x: 0.2, y: 0.3, comment: '便利贴', color: '#ff7a4a', createdAt: 2 },
+  ]);
+  const pkg = await packageService.exportAnnotationPackage(packageId);
+  assert.equal(pkg.format, 'paperweave-annotation-package');
+  assert.equal(pkg.annotations.length, 2);
+  assert.equal(pkg.paper.refText, undefined);
+  assert.ok(samples[0].equals(Buffer.from(pkg.pdfBase64, 'base64')));
+  const restoreStore = makeStore();
+  const restoreService = createService(restoreStore, { fetch: trackingFetch().fetch });
+  const restored = await restoreService.importAnnotationPackageBuffer(Buffer.from(JSON.stringify(pkg)));
+  assert.equal(restored.ok, true);
+  assert.equal(restored.annotationCount, 2);
+  assert.equal(restoreStore.getPaper(restored.paper.id).notes, '**还原笔记**');
+  assert.equal(restoreStore.getAnnotations(restored.paper.id)[0].comment, '**重点**');
+  restoreStore.setAnnotations(restored.paper.id, [...restoreStore.getAnnotations(restored.paper.id), { id: 'local', type: 'sticky', page: 1, x: 0.1, y: 0.1, comment: '保留' }]);
+  const mergedPackage = await restoreService.importAnnotationPackageBuffer(Buffer.from(JSON.stringify(pkg)));
+  assert.equal(restoreStore.papers.length, 1, '相同 PDF 恢复时复用论文');
+  assert.equal(mergedPackage.annotationCount, 3, '恢复批注不删除本地新增批注');
+  await assert.rejects(() => restoreService.importAnnotationPackageBuffer(Buffer.from('{"format":"wrong"}')), /不是有效的 PaperWeave 批注包/);
+  console.log('PASS 批注包导出、PDF 与 Markdown 批注还原、增量合并及无效包拒绝');
+
   const mainSource = fs.readFileSync(path.join(root, 'main', 'main.js'), 'utf8');
   const preloadSource = fs.readFileSync(path.join(root, 'preload', 'preload.js'), 'utf8');
   const bridgeSource = fs.readFileSync(path.join(root, 'renderer', 'bridge.js'), 'utf8');
   assert.match(mainSource, /papers:importUrls/);
   assert.match(mainSource, /import:progress/);
+  assert.match(mainSource, /ann:exportPackage/);
+  assert.match(mainSource, /ann:importPackage/);
   assert.match(preloadSource, /importUrls/);
   assert.match(preloadSource, /onImportProgress/);
+  assert.match(preloadSource, /exportAnnotationPackage/);
+  assert.match(preloadSource, /importAnnotationPackage/);
   assert.match(bridgeSource, /async importUrls\(urls, operationId\)/);
+  assert.match(bridgeSource, /async exportAnnotationPackage\(paperId, anns\)/);
+  assert.match(bridgeSource, /async importAnnotationPackage\(\)/);
   assert.match(bridgeSource, /AdaptiveScheduler/);
-  console.log('PASS 桌面与浏览器批量导入桥接契约');
+  console.log('PASS 桌面与浏览器批量导入、批注包桥接契约');
 })().catch(err => { console.error(err); process.exit(1); });

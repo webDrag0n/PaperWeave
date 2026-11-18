@@ -151,6 +151,8 @@ export class GraphView {
     this.edges = [];   // {link,a,b,line,pulse,phase,pulseBase}
     this.selectedIds = [];  // 多选集合（有序，最后一个为主选中）
     this.hopDepth = 2;      // N 跳高亮档位（1-5）
+    this.searchQuery = '';
+    this.searchMatchedIds = new Set();
     this.hoverId = null;
     this._raf = 0;
     this._built = false;
@@ -205,12 +207,29 @@ export class GraphView {
     el.addEventListener('wheel', (e) => this._onWheel(e), { capture: true, passive: false });
     el.addEventListener('pointerdown', (e) => {
       this._downPos = { x: e.clientX, y: e.clientY, t: performance.now() };
+      if (e.button === 0 && this.viewMode === 'network') this._centerNetworkRotation();
     });
     this._resizeHandler = () => this._resize();
     window.addEventListener('resize', this._resizeHandler);
 
     this._built = true;
     this._loop();
+  }
+
+  _nodeCentroid() {
+    const center = new THREE.Vector3();
+    if (!this.nodes.length) return center;
+    for (const nd of this.nodes) center.add(nd.pos);
+    return center.multiplyScalar(1 / this.nodes.length);
+  }
+
+  _centerNetworkRotation() {
+    if (!this.nodes.length || !this.controls) return;
+    const center = this._nodeCentroid();
+    const delta = center.clone().sub(this.controls.target);
+    this.controls.target.copy(center);
+    this.camera.position.add(delta);
+    this.controls.update();
   }
 
   _resize() {
@@ -220,6 +239,7 @@ export class GraphView {
     this.camera.aspect = wrap.clientWidth / wrap.clientHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+    if (this.nodes.length) this._fitCamera(true);
   }
 
   setData(papers, links, keepSelection = true) {
@@ -249,7 +269,7 @@ export class GraphView {
       // 节点整体缩小一倍，保留「引用关联越多节点越大」的梯度
       const radius = 1.2 + Math.min(3, Math.sqrt(deg) * 0.8);
       const geo = new THREE.SphereGeometry(radius, 24, 16);
-      const mat = new THREE.MeshBasicMaterial({ color: this.T.other });
+      const mat = new THREE.MeshBasicMaterial({ color: this.T.other, transparent: true });
       const mesh = new THREE.Mesh(geo, mat);
       const pos = new THREE.Vector3(
         (Math.random() - 0.5) * 2 * R,
@@ -290,10 +310,10 @@ export class GraphView {
     }
 
     this._layout();
-    this._fitCamera(true);
     const validSel = prevSel.filter(id => byId.has(id));
-    if (validSel.length) { this.selectedIds = validSel; this._recolor(); }
-    else this._recolor();
+    this.selectedIds = validSel;
+    this.setSearchQuery(this.searchQuery);
+    this._fitCamera(true);
     this.renderOnce();
   }
 
@@ -483,13 +503,15 @@ export class GraphView {
   _positionTimelineRuler() {
     const ruler = this.opts.timelineRulerEl;
     if (!ruler || this.viewMode !== 'timeline' || !this.timelineColumns.length) return;
-    const wrap = this.opts.wrap;
+    this.camera.updateMatrixWorld();
+    const canvasRect = this.renderer.domElement.getBoundingClientRect();
+    const rulerRect = ruler.getBoundingClientRect();
     const projected = this.timelineColumns.map((column, index) => {
       const point = new THREE.Vector3(column.x * this.timelineScale.x, this.timelineLabelY * this.timelineScale.y, 0).project(this.camera);
       return {
         index,
         key: column.key,
-        x: (point.x * 0.5 + 0.5) * wrap.clientWidth - ruler.offsetLeft,
+        x: (point.x * 0.5 + 0.5) * canvasRect.width + canvasRect.left - rulerRect.left,
         onScreen: point.z >= -1 && point.z <= 1,
       };
     });
@@ -601,27 +623,44 @@ export class GraphView {
   }
 
   _fitCamera(instant) {
-    if (!this.nodes.length) { this.camera.position.set(0, 0, 160); return; }
+    if (!this.nodes.length) {
+      this.camera.position.set(0, 0, 160);
+      this.controls.target.set(0, 0, 0);
+      return;
+    }
     if (this.viewMode === 'timeline') {
       this.timelineScale = { x: 1, y: 1 };
       this._applyTimelineScale();
     }
     const box = new THREE.Box3();
-    for (const nd of this.nodes) box.expandByPoint(nd.pos);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const wrap = this.opts.wrap;
-    const sideOpen = this.viewMode === 'timeline' && this.opts.sideEl && !this.opts.sideEl.classList.contains('hidden');
-    const sideWidth = sideOpen ? Math.min(336, wrap.clientWidth * 0.35) : 0;
-    const halfFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
-    let dist = Math.max(70, size.length() * 1.15);
-    if (this.viewMode === 'timeline') {
-      const availableAspect = Math.max(0.5, (wrap.clientWidth - sideWidth) / wrap.clientHeight);
-      const fitHeight = (size.y + 36) / (2 * Math.tan(halfFov));
-      const fitWidth = (size.x + 44) / (2 * Math.tan(halfFov) * availableAspect);
-      dist = Math.max(70, fitHeight, fitWidth) * 1.16;
-      if (sideWidth) center.x += (sideWidth / wrap.clientWidth) * dist * Math.tan(halfFov) * this.camera.aspect;
+    for (const nd of this.nodes) {
+      const radius = nd.mesh.geometry.parameters.radius || 2;
+      const marginX = this.viewMode === 'timeline' ? radius + 24 : radius + 3;
+      const marginY = this.viewMode === 'timeline' ? radius + 16 : radius + 3;
+      box.expandByPoint(nd.pos.clone().add(new THREE.Vector3(-marginX, -marginY, -radius)));
+      box.expandByPoint(nd.pos.clone().add(new THREE.Vector3(marginX, marginY, radius)));
+      if (this.viewMode === 'network' && nd.label) {
+        const halfW = nd.label.userData.baseScaleX / 2 + 4;
+        const halfH = nd.label.userData.baseScaleY / 2 + 4;
+        box.expandByPoint(nd.label.position.clone().add(new THREE.Vector3(-halfW, -halfH, 0)));
+        box.expandByPoint(nd.label.position.clone().add(new THREE.Vector3(halfW, halfH, 0)));
+      }
     }
+    const center = this._nodeCentroid();
+    const wrap = this.opts.wrap;
+    const sideOpen = this.opts.sideEl && !this.opts.sideEl.classList.contains('hidden');
+    const sideWidth = sideOpen ? Math.min(336, wrap.clientWidth * 0.35) : 0;
+    const availableAspect = Math.max(0.5, (wrap.clientWidth - sideWidth) / wrap.clientHeight);
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
+    const spanX = Math.max(Math.abs(box.min.x - center.x), Math.abs(box.max.x - center.x));
+    const spanY = Math.max(Math.abs(box.min.y - center.y), Math.abs(box.max.y - center.y));
+    const spanZ = Math.max(Math.abs(box.min.z - center.z), Math.abs(box.max.z - center.z));
+    const fitHeight = spanY / Math.tan(halfFov);
+    const fitWidth = spanX / (Math.tan(halfFov) * availableAspect);
+    const dist = Math.max(70, fitHeight, fitWidth) * 1.16 + spanZ;
+    if (sideWidth) this.camera.setViewOffset(wrap.clientWidth, wrap.clientHeight, sideWidth / 2, 0, wrap.clientWidth, wrap.clientHeight);
+    else this.camera.clearViewOffset();
+    this.camera.updateProjectionMatrix();
     const tilt = this.viewMode === 'timeline' ? 0 : 0.12;
     const toPos = new THREE.Vector3(center.x, center.y + dist * tilt, center.z + dist);
     if (instant) {
@@ -669,6 +708,18 @@ export class GraphView {
   setHopDepth(n) {
     this.hopDepth = Math.max(1, Math.min(5, n | 0));
     this._recolor();
+  }
+
+  setSearchQuery(query) {
+    this.searchQuery = String(query || '').trim().toLocaleLowerCase();
+    this.searchMatchedIds = new Set(this.nodes.filter(nd => {
+      if (!this.searchQuery) return false;
+      const p = nd.paper;
+      return [p.title, (p.authors || []).join(' '), (p.tags || []).join(' '), p.doi, p.venue, p.year]
+        .join(' ').toLocaleLowerCase().includes(this.searchQuery);
+    }).map(nd => nd.id));
+    this._recolor();
+    return this.searchMatchedIds.size;
   }
 
   // 从所有选中节点做无向 BFS，跳数 = 到最近选中节点的距离
@@ -749,22 +800,26 @@ export class GraphView {
 
     for (const nd of this.nodes) {
       const h = hop.get(nd.id);
+      const matched = this.searchMatchedIds.has(nd.id);
       let color = T.other;
       if (sel.length && h !== undefined && h <= this.hopDepth) {
         color = h === 0 ? T.selected : T.hops[Math.min(h, T.hops.length) - 1];
       }
+      if (this.searchQuery) color = matched ? T.selected : T.other;
       nd.mesh.material.color.setHex(color);
+      nd.mesh.material.opacity = this.searchQuery && !matched ? 0.22 : 1;
       nd.mesh.material.needsUpdate = true;
       if (nd.glow) {
-        const active = sel.length && h !== undefined && h <= this.hopDepth;
+        const active = this.searchQuery ? matched : (sel.length && h !== undefined && h <= this.hopDepth);
         nd.glow.material.color.setHex(color);
-        nd.glow.material.opacity = active ? T.glowStrength : 0.12;
+        nd.glow.material.opacity = active ? T.glowStrength : (this.searchQuery ? 0.03 : 0.12);
       }
       // 所有论文的标签默认常显（无论是否选中）
       if (!nd.label) {
         nd.label = makeLabelSprite(nd.paper.title || '未命名', T);
         this.labelGroup.add(nd.label);
       }
+      nd.label.material.opacity = this.searchQuery && !matched ? 0.25 : 1;
       this._positionNodeLabel(nd);
     }
 
@@ -779,11 +834,16 @@ export class GraphView {
           opacity = 0.95;
         }
       }
+      if (this.searchQuery) {
+        const matched = this.searchMatchedIds.has(e.a.id) && this.searchMatchedIds.has(e.b.id);
+        color = matched ? T.selected : T.edgeBase;
+        opacity = matched ? 0.95 : 0.08;
+      }
       e.line.material.color.setHex(color);
       e.line.material.opacity = opacity;
       if (e.pulse) {
         e.pulse.material.color.setHex(color);
-        e.pulseBase = opacity >= 0.9 ? 0.95 : 0.5; // 高亮边的流光更明显
+        e.pulseBase = opacity >= 0.9 ? 0.95 : (this.searchQuery ? 0.08 : 0.5); // 高亮边的流光更明显
       }
     }
 
@@ -927,6 +987,7 @@ export class GraphView {
       e.pulse.material.opacity = (e.pulseBase ?? 0.5) * Math.sin(Math.PI * t);
     }
     this.controls.update();
+    this.camera.updateMatrixWorld();
     this._updateLabelScales();
     this._updateLabelVisibility();
     this._positionTimelineRuler();

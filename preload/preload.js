@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('paperweave', {
 
   listAnnotations: (paperId) => ipcRenderer.invoke('ann:list', paperId),
   saveAnnotations: (paperId, anns) => ipcRenderer.invoke('ann:save', paperId, anns),
+  exportAnnotationPackage: (paperId, anns) => ipcRenderer.invoke('ann:exportPackage', paperId, anns),
+  importAnnotationPackage: () => ipcRenderer.invoke('ann:importPackage'),
 
   listLinks: () => ipcRenderer.invoke('links:list'),
   listAllLinks: () => ipcRenderer.invoke('links:listAll'),

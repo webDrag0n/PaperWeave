@@ -150,7 +150,7 @@ PaperWeave Connector 无需用户手动复制令牌或确认授权：插件自�
 
 ```bash
 curl http://127.0.0.1:24680/api/ping
-# {"ok":true,"name":"PaperWeave","version":"1.5.0","api":10}
+# {"ok":true,"name":"PaperWeave","version":"1.6.0","api":10}
 ```
 
 ---
@@ -224,7 +224,7 @@ curl http://127.0.0.1:24680/api/ping
 
 ```bash
 curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/status
-# {"ok":true,"data":{"version":"1.5.0","papers":6,"links":9,"annotations":3,"libraryDir":"..."}}
+# {"ok":true,"data":{"version":"1.6.0","papers":6,"links":9,"annotations":3,"libraryDir":"..."}}
 ```
 
 ### 3.2 论文库（多库管理，0.8.0+）
@@ -372,6 +372,7 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/graph
 
 | API 版本 | PaperWeave | 变更 |
 | --- | --- | --- |
+| 10（HTTP 不变） | 1.6.0 | GUI：Markdown 批注与下划线防重叠、可还原批注包、选中文字搜索；引用面板搜索与三种排序；时间线刻度对齐、图谱边界与质心修复、全节点搜索高亮；论文库全维度分区排序 |
 | 10 | 1.5.0 | 新增 PDF 逐页正文与原文定位、跨库论文/引用列表、已有论文直接入库、单条批注修改/删除；MCP 增至 35 个工具，增加科研助理握手指引、资源与洞察/兴趣高亮提示 |
 | 1 | 0.1.0 | 首个版本：论文库、导入、批注、笔记、引用关联、图谱 |
 | 1（HTTP 不变） | 0.1.0 | 新增 MCP stdio Server 包装（`paperweave-mcp.js`，16 个工具） |

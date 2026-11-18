@@ -368,6 +368,69 @@ const webBridge = {
     saveData(d);
     return d.annotations[paperId];
   },
+  async exportAnnotationPackage(paperId, anns) {
+    const d = loadData();
+    const paper = d.papers.find(p => p.id === paperId);
+    if (!paper) return { ok: false, error: '论文不存在' };
+    const bytes = await this.readPaperBytes(paperId);
+    if (!bytes) return { ok: false, error: '找不到 PDF 文件' };
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    const metadata = {};
+    for (const key of ['title', 'authors', 'year', 'doi', 'abstract', 'venue', 'tags', 'notes', 'rating', 'favorite', 'lastPage']) {
+      if (paper[key] !== undefined) metadata[key] = paper[key];
+    }
+    const pkg = {
+      format: 'paperweave-annotation-package', version: 1, exportedAt: new Date().toISOString(),
+      paper: metadata, fileName: (String(paper.title || 'paper').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120) || 'paper') + '.pdf',
+      annotations: Array.isArray(anns) ? anns : (d.annotations[paperId] || []), pdfBase64: btoa(binary),
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(pkg)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (String(paper.title || 'paper').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120) || 'paper') + '.pwpackage';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return { ok: true, path: a.download, annotationCount: pkg.annotations.length };
+  },
+  async importAnnotationPackage() {
+    return new Promise(resolve => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.pwpackage,.json,application/json';
+      input.oncancel = () => resolve({ canceled: true });
+      input.onchange = async () => {
+        try {
+          const file = input.files[0];
+          if (!file) { resolve({ canceled: true }); return; }
+          if (file.size > 512 * 1024 * 1024) throw new Error('批注包超过 512 MB 限制');
+          const pkg = JSON.parse(await file.text());
+          if (!pkg || pkg.format !== 'paperweave-annotation-package' || pkg.version !== 1 || !pkg.paper || typeof pkg.pdfBase64 !== 'string' || !Array.isArray(pkg.annotations) || !/^[A-Za-z0-9+/]*={0,2}$/.test(pkg.pdfBase64)) {
+            throw new Error('不是有效的 PaperWeave 批注包');
+          }
+          const binary = atob(pkg.pdfBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          if (bytes.length < 5 || new TextDecoder('latin1').decode(bytes.subarray(0, 5)) !== '%PDF-') throw new Error('批注包中的 PDF 数据无效');
+          const result = await webImportBuffer(bytes.buffer, String(pkg.fileName || file.name.replace(/\.pwpackage$/i, '') + '.pdf'), { conflictPolicy: 'merge', noAutoFetch: true });
+          if (!result.paper) { resolve(result); return; }
+          const d = loadData();
+          const paper = d.papers.find(p => p.id === result.paper.id);
+          for (const key of ['title', 'authors', 'year', 'doi', 'abstract', 'venue', 'tags', 'notes', 'rating', 'favorite', 'lastPage']) {
+            if (pkg.paper[key] !== undefined) paper[key] = pkg.paper[key];
+          }
+          const merged = new Map((d.annotations[paper.id] || []).filter(a => a && typeof a.id === 'string').map(a => [a.id, a]));
+          for (const ann of pkg.annotations.slice(0, 10000)) {
+            if (ann && typeof ann.id === 'string' && ['highlight', 'sticky'].includes(ann.type)) merged.set(ann.id, ann);
+          }
+          d.annotations[paper.id] = [...merged.values()];
+          saveData(d);
+          resolve({ ...result, ok: true, paper: pub(paper), annotationCount: merged.size });
+        } catch (e) { resolve({ ok: false, error: e.message || '批注包导入失败' }); }
+      };
+      input.click();
+    });
+  },
   async listLinks() { return curLib(loadData()).links; },
   async listAllLinks() {
     const d = loadData();

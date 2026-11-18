@@ -1,5 +1,6 @@
 // PaperWeave PDF 阅读器：pdf.js 渲染 + 文本层高亮 + 便利贴
 import * as pdfjs from 'pdfjs';
+import { renderMarkdown } from './markdown.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdfjs/pdf.worker.mjs', import.meta.url).href;
 
@@ -283,20 +284,61 @@ export class PdfViewer {
     this.opts.onCitationLeave && this.opts.onCitationLeave();
   }
 
+  _layoutUnderlines(p) {
+    const height = p.viewport1.height * this.scale;
+    const lineHeight = Math.max(1.5, height * 0.0025);
+    const gap = Math.max(1, lineHeight * 0.6);
+    const entries = [];
+    for (const a of this.annotations.filter(x => x.type === 'highlight' && x.page === p.num && x.comment && Array.isArray(x.quads))) {
+      PdfViewer.normalizeQuads(a.quads).forEach((q, quadIndex) => {
+        entries.push({ a, q, quadIndex, baseTop: Math.max(0, Math.min(height - lineHeight, (q.y + q.h) * height)) });
+      });
+    }
+    entries.sort((x, y) => x.baseTop - y.baseTop || x.q.x - y.q.x || String(x.a.id).localeCompare(String(y.a.id)));
+    const placed = [];
+    const byId = new Map();
+    let previousTop = -Infinity;
+    for (const entry of entries) {
+      let top = Math.max(entry.baseTop, previousTop + 0.25);
+      for (;;) {
+        const blockers = placed.filter(other => entry.q.x < other.q.x + other.q.w && other.q.x < entry.q.x + entry.q.w
+          && top < other.top + lineHeight + gap && top + lineHeight + gap > other.top);
+        if (!blockers.length) break;
+        top = Math.max(...blockers.map(other => other.top + lineHeight + gap));
+      }
+      entry.top = top;
+      placed.push(entry);
+      previousTop = top;
+      if (!byId.has(entry.a.id)) byId.set(entry.a.id, []);
+      byId.get(entry.a.id)[entry.quadIndex] = entry;
+    }
+    return { entries, byId, lineHeight, height };
+  }
+
   _renderAnnotationsFor(p) {
     p.hlLayer.innerHTML = '';
     p.iconLayer.innerHTML = '';
     if (!p.viewport && !p.viewport1) return;
+    const underlineLayout = this._layoutUnderlines(p);
     for (const a of this.annotations.filter(x => x.page === p.num)) {
       if (a.type === 'highlight' && Array.isArray(a.quads)) {
         // 百分比坐标始终绑定页面本身，交互缩放和高清重绘都不需要重新猜测像素位置。
-        for (const q of PdfViewer.normalizeQuads(a.quads)) {
+        PdfViewer.normalizeQuads(a.quads).forEach((q, quadIndex) => {
           const box = document.createElement('div');
-          box.className = 'hl-box';
+          const underlined = !!a.comment;
+          box.className = 'hl-box' + (underlined ? ' annotation-underline' : '');
+          box.dataset.annotationId = a.id;
           box.style.left = (q.x * 100) + '%';
-          box.style.top = (q.y * 100) + '%';
           box.style.width = (q.w * 100) + '%';
-          box.style.height = (q.h * 100) + '%';
+          if (underlined) {
+            const layout = underlineLayout.byId.get(a.id)?.[quadIndex];
+            if (!layout) return;
+            box.style.top = (layout.top / underlineLayout.height * 100) + '%';
+            box.style.height = (underlineLayout.lineHeight / underlineLayout.height * 100) + '%';
+          } else {
+            box.style.top = (q.y * 100) + '%';
+            box.style.height = (q.h * 100) + '%';
+          }
           box.style.background = a.color || '#ffe74a';
           box.title = a.comment || a.text || '';
           box.addEventListener('click', (ev) => {
@@ -304,7 +346,7 @@ export class PdfViewer {
             this.opts.onAnnotClick && this.opts.onAnnotClick(a, ev);
           });
           p.hlLayer.appendChild(box);
-        }
+        });
       } else if (a.type === 'sticky') {
         const icon = document.createElement('div');
         icon.className = 'sticky-icon';
@@ -327,37 +369,53 @@ export class PdfViewer {
     if (!p.viewport1 || !p.noteRail) return;
     const width = p.viewport1.width * this.scale;
     const height = p.viewport1.height * this.scale;
+    const underlineLayout = this._layoutUnderlines(p);
     p.row.style.width = width + 'px';
     p.noteRail.replaceChildren();
     p.noteLines.replaceChildren();
     let bottom = 0;
     const notes = this.annotations.filter(a => a.type === 'highlight' && a.page === p.num && a.comment && a.quads?.length)
-      .map(a => ({ a, q: PdfViewer.normalizeQuads(a.quads)[0] }))
-      .filter(x => x.q)
-      .sort((x, y) => x.q.y - y.q.y);
-    for (const { a, q } of notes) {
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'pdf-margin-note';
-      card.textContent = a.comment;
+      .map(a => ({ a, entry: underlineLayout.byId.get(a.id)?.[0] }))
+      .filter(x => x.entry)
+      .sort((x, y) => x.entry.top - y.entry.top || String(x.a.id).localeCompare(String(y.a.id)));
+    const channelWidth = Math.max(16, Math.min(72, notes.length * 3 + 4));
+    const channelGap = (channelWidth - 4) / Math.max(1, notes.length);
+    notes.forEach(({ a, entry }, index) => {
+      const q = entry.q;
+      const card = document.createElement('div');
+      card.className = 'pdf-margin-note markdown';
+      card.dataset.annotationId = a.id;
+      card.tabIndex = 0;
+      card.setAttribute('role', 'button');
+      card.innerHTML = renderMarkdown(a.comment);
       card.style.borderLeftColor = /^#[0-9a-f]{6}$/i.test(a.color) ? a.color : '#ffe74a';
+      card.style.left = channelWidth + 'px';
+      card.style.width = (212 - channelWidth) + 'px';
       card.addEventListener('click', (ev) => {
         ev.stopPropagation();
+        if (ev.target.closest('a')) return;
         this.openNotePopup(a, ev.clientX, ev.clientY);
       });
+      card.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        ev.preventDefault();
+        const rect = card.getBoundingClientRect();
+        this.openNotePopup(a, rect.left, rect.top);
+      });
       p.noteRail.appendChild(card);
-      const anchorY = (q.y + q.h / 2) * height;
-      const top = Math.max(8, anchorY - card.offsetHeight / 2, bottom + 8);
+      const underlineY = entry.top + underlineLayout.lineHeight / 2;
+      const top = Math.max(8, underlineY - card.offsetHeight / 2, bottom + 8);
       card.style.top = top + 'px';
       bottom = top + card.offsetHeight;
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.dataset.annotationId = a.id;
       const x1 = (q.x + q.w) * width;
-      const x2 = width + 16;
-      const midX = width + 8;
-      path.setAttribute('d', `M ${x1} ${anchorY} H ${midX} V ${top + card.offsetHeight / 2} H ${x2}`);
+      const x2 = width + channelWidth;
+      const midX = x2 - 2 - index * channelGap;
+      path.setAttribute('d', `M ${x1} ${underlineY} H ${midX} V ${top + card.offsetHeight / 2} H ${x2}`);
       path.setAttribute('stroke', card.style.borderLeftColor);
       p.noteLines.appendChild(path);
-    }
+    });
     const rowHeight = Math.max(height, bottom + 8);
     p.row.style.height = rowHeight + 'px';
     p.noteLines.setAttribute('viewBox', `0 0 ${width + 220} ${rowHeight}`);
@@ -610,6 +668,10 @@ export class PdfViewer {
     const textarea = popup.querySelector('textarea');
     popup.classList.remove('hidden');
     textarea.value = ann.comment || '';
+    textarea.classList.remove('hidden');
+    popup.querySelector('#notePopupMarkdown').classList.add('hidden');
+    popup.querySelector('#notePopupEdit').classList.add('btn-primary');
+    popup.querySelector('#notePopupPreview').classList.remove('btn-primary');
     const w = 300;
     popup.style.left = Math.max(8, Math.min(window.innerWidth - w - 16, clientX - w / 2)) + 'px';
     popup.style.top = Math.max(8, Math.min(window.innerHeight - 220, clientY + 10)) + 'px';
