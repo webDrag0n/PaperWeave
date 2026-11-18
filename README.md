@@ -145,8 +145,8 @@ npm run dev          # 浏览器预览模式（http://localhost:7100/，示例�
 
 PaperWeave 提供两种 Agent 接入方式，完整契约与版本历史见 [`agents/AGENTS.md`](agents/AGENTS.md)：
 
-- **本地 HTTP Agent API**（`127.0.0.1:24680`，`X-PaperWeave-Token` 令牌鉴权）：论文库管理、导入、批注、笔记、引用抓取与下载、图谱读取、实时进度查询
-- **MCP stdio Server**（`mcp/paperweave-mcp.js`，零依赖单文件）：Claude Desktop / Cursor / Kimi 等宿主配置 `node paperweave-mcp.js` 即可接入；工具与 HTTP API 一一对应，另有 Resources 与 Prompt 工作流模板（精读 / 综述 / 导入建联）
+- **本地 HTTP Agent API**（`127.0.0.1:24680`，`X-PaperWeave-Token` 令牌鉴权）：论文库管理、PDF 逐页正文与原文定位、批注、笔记、引用抓取与下载、跨库图谱与进度查询
+- **MCP stdio Server**（`mcp/paperweave-mcp.js`，零依赖单文件）：Claude Desktop / Cursor / Kimi 等宿主配置 `node paperweave-mcp.js` 即可接入；提供正文阅读、原始 PDF 资源、检索、高亮和库管理工具，附有科研助理使用指引与精读、综述、洞察、兴趣高亮等工作流模板
 
 ```jsonc
 // MCP 宿主配置示例

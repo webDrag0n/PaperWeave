@@ -1,6 +1,6 @@
 # 架构与设计
 
-本文描述 PaperWeave 的整体设计、模块边界、数据模型和核心流程，面向需要修改代码的开发者与 coding agent。内容以 v1.3.0 源码为准；对外接口的字段级细节以 [`agents/AGENTS.md`](../agents/AGENTS.md) 为准，本文不重复。
+本文描述 PaperWeave 的整体设计、模块边界、数据模型和核心流程，面向需要修改代码的开发者与 coding agent。内容以当前源码为准；对外接口的字段级细节以 [`agents/AGENTS.md`](../agents/AGENTS.md) 为准，本文不重复。
 
 ## 1. 定位与设计目标
 
@@ -46,7 +46,7 @@ flowchart LR
   RF --> NET[(Semantic Scholar / OpenAlex<br/>CrossRef / arXiv)]
 ```
 
-读写单个字段这类简单操作，IPC 与 HTTP 两条入口都直接调用 `Store`；包含流程的操作（导入、引用抓取、下载）必须经过 `service.js`，这样界面与 agent 的行为才保持一致。
+读写单个字段这类简单操作，IPC 与 HTTP 两条入口都直接调用 `Store`；包含流程的操作（导入、引用抓取、下载、PDF 逐页文本提取与原文定位）必须经过 `service.js`，这样界面与 agent 的行为才保持一致。
 
 ### 模块职责
 
@@ -116,6 +116,7 @@ agent-api.json       当前运行实例的连接信息（端口、令牌、pid�
 - **论文库是视图**。论文库只记录包含哪些论文 id，以及库内的引用边。同一对论文在不同库里可以有不同的边。「全部已下载」直接读取全局注册表并合并各库关系，包含未加入任何库的论文；该视图中的删除调用 `purgePaper`，从所有库与全局记录中清除。
 - **引用边有方向**。`{ from, to }` 表示 from 引用了 to。全项目统一这一方向，包括图谱、API 与相似度计算。
 - **批注跟随论文**。批注全局保存，不区分论文库。高亮与便利贴使用相对页面宽高的归一化坐标，缩放后无需换算；高亮与搜索色块在文字下方通过混合模式形成背景，不改变文字颜色。
+- **阅读器横向布局**。页面列表以正文宽度参与居中与滚动范围计算；页边批注栏绝对定位在正文右侧，不把正文推入负坐标。适应宽度后横向滚动位置归零。
 - **删除是引用计数式的**。`removePaper` 只把论文移出当前库；不再属于任何库时才删除全局记录、批注和 PDF 文件。
 - **`refText` 不出进程**。参考文献段落原文只在主进程内使用，返回给渲染进程或 API 之前一律置为 `undefined`。
 
@@ -212,6 +213,8 @@ PDF 高亮点击由 `PdfViewer` 按页面百分比坐标命中，`app.js` 展示
 
 应用启动时把端口与令牌写入 `agent-api.json`（数据目录，以及可写时的可执行文件同目录）。打包时 `agents/AGENTS.md`、`mcp/paperweave-mcp.js`、`extension/` 通过 `extraResources` 进入安装包的 `resources/`；打包版每次启动还会尝试把前两者复制到可执行文件同目录，目录不可写时静默跳过。
 
+MCP 握手通过 `instructions` 提供科研助理的取证规则，`tools` 执行读写，`resources` 提供正文与操作指南，`prompts` 提供精读、综述、洞察和兴趣高亮流程。PDF 文本提取与原文坐标定位放在 `service.js`，由 HTTP 和 MCP 共用；每次调用限制页数与返回量。
+
 契约有两个版本号，互相独立：应用版本（`package.json`，语义化版本）与 API 版本（`/api/ping` 返回的整数）。规则见 [发布流程](releasing.md#版本号)。
 
 ## 7. 安全边界
@@ -258,7 +261,7 @@ PDF 高亮点击由 `PdfViewer` 按页面百分比坐标命中，`app.js` 展示
 - **`app.js` 体量大**。约 2100 行的单一控制器，状态集中在模块级 `state` 对象。
 - **合并导入留下孤儿 PDF**。导入第一步就把文件写入 `library/`，冲突后选择复用已有论文或取消时，新写入的文件不会被清理。
 - **`store.data` 是兼容层**。这个 getter 每次访问都重建数组，新代码应直接调用 `listPapers()`、`listLinks()` 等方法。
-- **版本常量未统一**。`mcp/paperweave-mcp.js` 的 `SERVER_INFO.version` 停留在 `1.0.0`，`service.js` 的下载 User-Agent 为 `PaperWeave/0.3`，均未随应用版本更新。
+- **版本常量未统一**。MCP `SERVER_INFO.version` 与应用版本独立维护；`service.js` 的下载 User-Agent 仍为 `PaperWeave/0.3`。
 - **Electron 测试运行器偏向 Windows**。`tools/selftest.js`、`api-test.js`、`mcp-test.js` 收尾时调用 `taskkill`，其他平台未验证。
 - **没有自动更新**。构建会产出 `latest.yml` 与 blockmap，但应用内没有接入更新器。
 - **`tools/` 内有机器相关脚本**。`installed-mcp-demo.js`、`live-fetch-demo.js`、`live-progress-demo.js`、`seed-real-library.js`、`wam-cross-check.js`、`wam-link-demo.js` 依赖特定本机环境，不属于测试体系。

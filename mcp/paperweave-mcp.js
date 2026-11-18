@@ -21,7 +21,8 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 
-const SERVER_INFO = { name: 'paperweave', version: '1.0.0' };
+const SERVER_INFO = { name: 'paperweave', version: '1.1.0' };
+const SERVER_INSTRUCTIONS = '你是用户的科研助理。先确认研究问题与当前论文库，再用论文详情、逐页正文、原文检索、批注和引用图谱取证；区分论文原文、作者主张与自己的推断，结论标注论文 id 和页码。总结需包含方法、证据、局限与后续问题；寻找关联时说明引用方向（from 引用 to）及依据。根据用户主题和已有批注推荐值得高亮的原文，调用 find_text 取得页码与 quads 后才可 add_annotation；不要凭空编造坐标。写入笔记、批注或下载文献前遵循用户意图，保留已有内容。PDF 可能是扫描件，提取不到文字时如实说明。';
 const PROTOCOL_VERSIONS = new Set(['2025-06-18', '2025-03-26', '2024-11-05']);
 
 /* ---------------- 连接信息 ---------------- */
@@ -87,6 +88,39 @@ function callApi(method, apiPath, body) {
       else resolve({ __error: '连接 PaperWeave 失败：' + e.message });
     });
     if (data) req.write(data);
+    req.end();
+  });
+}
+
+function readPdfResource(paperId) {
+  return new Promise(resolve => {
+    const conn = loadConn();
+    if (!conn) return resolve({ __error: '找不到 PaperWeave 连接信息。请先启动应用。' });
+    const u = new URL(conn.baseUrl + '/api/papers/' + encodeURIComponent(paperId) + '/pdf');
+    let settled = false;
+    const done = value => { if (!settled) { settled = true; resolve(value); } };
+    const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname, method: 'GET',
+      headers: { 'X-PaperWeave-Token': conn.token }, timeout: 120000 }, res => {
+      const chunks = [];
+      let size = 0;
+      res.on('data', chunk => {
+        size += chunk.length;
+        if (size > 64 * 1024 * 1024) { done({ __error: 'PDF 超过 MCP 资源的 64 MiB 限制，可通过 HTTP API 获取原文件。' }); req.destroy(); return; }
+        chunks.push(chunk);
+      });
+      res.on('end', () => {
+        if (settled) return;
+        const buf = Buffer.concat(chunks);
+        if (res.statusCode !== 200) {
+          let error = 'HTTP ' + res.statusCode;
+          try { error = JSON.parse(buf.toString('utf8')).error || error; } catch (_) {}
+          return done({ __error: error });
+        }
+        done({ mimeType: 'application/pdf', blob: buf.toString('base64') });
+      });
+    });
+    req.on('timeout', () => { req.destroy(); done({ __error: '读取 PDF 超时' }); });
+    req.on('error', e => done({ __error: '读取 PDF 失败：' + e.message }));
     req.end();
   });
 }
@@ -392,6 +426,80 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
+  {
+    name: 'paperweave_list_all_papers',
+    description: '列出所有论文库中的全部论文，含未归属论文与 libraryIds。用于跨库发现和去重。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'paperweave_read_pages',
+    description: '逐页读取库内 PDF 正文文本，带页码和 nextPage。总结论文时必须结合正文，不要只凭摘要；扫描件可能返回空文本。每次最多 10 页。',
+    inputSchema: { type: 'object', properties: {
+      paperId: { type: 'string' }, startPage: { type: 'integer', minimum: 1 },
+      pageCount: { type: 'integer', minimum: 1, maximum: 10 },
+    }, required: ['paperId'], additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'paperweave_find_text',
+    description: '在 PDF 正文中查找原文短语，返回页码、上下文和近似归一化 quads，可供 add_annotation 定位。若有多个匹配，先核对上下文再高亮；每次最多检索 50 页。',
+    inputSchema: { type: 'object', properties: {
+      paperId: { type: 'string' }, query: { type: 'string', minLength: 1, maxLength: 200 },
+      startPage: { type: 'integer', minimum: 1 }, pageCount: { type: 'integer', minimum: 1, maximum: 50 },
+    }, required: ['paperId', 'query'], additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'paperweave_update_annotation',
+    description: '按批注 id 修改评论、颜色、文本或位置，保留同篇论文的其他批注。',
+    inputSchema: { type: 'object', properties: {
+      paperId: { type: 'string' }, annotationId: { type: 'string' },
+      comment: { type: 'string' }, color: { type: 'string' }, text: { type: 'string' },
+      page: { type: 'integer', minimum: 1 }, quads: { type: 'array', items: { type: 'object' } },
+      x: { type: 'number' }, y: { type: 'number' },
+    }, required: ['paperId', 'annotationId'], additionalProperties: false },
+  },
+  {
+    name: 'paperweave_delete_annotation',
+    description: '按批注 id 删除单条高亮或便利贴，保留其他批注。',
+    inputSchema: { type: 'object', properties: { paperId: { type: 'string' }, annotationId: { type: 'string' } }, required: ['paperId', 'annotationId'], additionalProperties: false },
+    annotations: { destructiveHint: true },
+  },
+  {
+    name: 'paperweave_list_all_links',
+    description: '跨论文库汇总引用边，同一 from/to 仅显示一次，libraryLinks 保留各库原始关联 id。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'paperweave_add_to_library',
+    description: '把已下载的论文加入指定论文库，复用全局论文 id。',
+    inputSchema: { type: 'object', properties: { paperId: { type: 'string' }, libraryId: { type: 'string' } }, required: ['paperId', 'libraryId'], additionalProperties: false },
+  },
+  {
+    name: 'paperweave_delete_library',
+    description: '删除指定论文库；全局论文本体可能仍属于其他库。至少须保留一个库。',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+    annotations: { destructiveHint: true },
+  },
+  {
+    name: 'paperweave_get_fetch_progress',
+    description: '查询某篇论文当前的引用抓取与下载进度。',
+    inputSchema: { type: 'object', properties: { paperId: { type: 'string' } }, required: ['paperId'], additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'paperweave_import_web',
+    description: '从网页 PDF 地址导入并补齐网页元数据，可指定目标论文库；已有非空元数据不会被覆盖。',
+    inputSchema: { type: 'object', properties: {
+      url: { type: 'string' }, pdfUrl: { type: 'string' }, libraryId: { type: 'string' },
+      title: { type: 'string' }, authors: { type: 'array', items: { type: 'string' } },
+      year: { type: 'string' }, doi: { type: 'string' }, abstract: { type: 'string' },
+      venue: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } },
+      rating: { type: 'number' }, conflictPolicy: { type: 'string', enum: ['auto', 'merge', 'new'] },
+    }, additionalProperties: false },
+  },
 ];
 
 /* ---------------- 工具执行 ---------------- */
@@ -461,6 +569,32 @@ async function runTool(name, args) {
       return callApi('POST', '/api/libraries/current', { id: a.id });
     case 'paperweave_get_graph':
       return callApi('GET', '/api/graph');
+    case 'paperweave_list_all_papers':
+      return callApi('GET', '/api/papers/all');
+    case 'paperweave_read_pages': {
+      const query = new URLSearchParams({ startPage: String(a.startPage ?? 1), pageCount: String(a.pageCount ?? 3) });
+      return callApi('GET', '/api/papers/' + encodeURIComponent(a.paperId) + '/text?' + query);
+    }
+    case 'paperweave_find_text': {
+      const query = new URLSearchParams({ query: String(a.query || ''), startPage: String(a.startPage ?? 1), pageCount: String(a.pageCount ?? 30) });
+      return callApi('GET', '/api/papers/' + encodeURIComponent(a.paperId) + '/find-text?' + query);
+    }
+    case 'paperweave_update_annotation': {
+      const { paperId, annotationId, ...patch } = a;
+      return callApi('PATCH', '/api/papers/' + encodeURIComponent(paperId) + '/annotations/' + encodeURIComponent(annotationId), patch);
+    }
+    case 'paperweave_delete_annotation':
+      return callApi('DELETE', '/api/papers/' + encodeURIComponent(a.paperId) + '/annotations/' + encodeURIComponent(a.annotationId));
+    case 'paperweave_list_all_links':
+      return callApi('GET', '/api/links/all');
+    case 'paperweave_add_to_library':
+      return callApi('POST', '/api/libraries/' + encodeURIComponent(a.libraryId) + '/papers', { paperId: a.paperId });
+    case 'paperweave_delete_library':
+      return callApi('DELETE', '/api/libraries/' + encodeURIComponent(a.id));
+    case 'paperweave_get_fetch_progress':
+      return callApi('GET', '/api/papers/' + encodeURIComponent(a.paperId) + '/fetch-progress');
+    case 'paperweave_import_web':
+      return callApi('POST', '/api/papers/import-web', a);
     default:
       return { __error: '未知工具：' + name };
   }
@@ -468,6 +602,18 @@ async function runTool(name, args) {
 
 /* ---------------- 资源（Resources） ---------------- */
 const RESOURCE_LIST = [
+  {
+    uri: 'paperweave://guide', name: '科研助理使用指南',
+    description: '取证、总结、关联分析与高亮建议的工作准则', mimeType: 'text/markdown',
+  },
+  {
+    uri: 'paperweave://all-papers', name: '全部已下载论文',
+    description: '跨库论文列表，包含 libraryIds', mimeType: 'application/json',
+  },
+  {
+    uri: 'paperweave://all-links', name: '跨库引用关系',
+    description: '跨库去重的引用边列表', mimeType: 'application/json',
+  },
   {
     uri: 'paperweave://papers',
     name: '论文库列表',
@@ -483,6 +629,14 @@ const RESOURCE_LIST = [
 ];
 
 const RESOURCE_TEMPLATE_LIST = [
+  {
+    uriTemplate: 'paperweave://papers/{id}/pdf',
+    name: 'PDF 原文件', description: '论文 PDF 的 base64 二进制资源（最大 64 MiB）', mimeType: 'application/pdf',
+  },
+  {
+    uriTemplate: 'paperweave://papers/{id}/pages/{page}',
+    name: 'PDF 单页正文', description: '指定论文与页码的提取文本', mimeType: 'text/plain',
+  },
   {
     uriTemplate: 'paperweave://papers/{id}',
     name: '论文详情',
@@ -504,6 +658,21 @@ const RESOURCE_TEMPLATE_LIST = [
 ];
 
 async function readResource(uri) {
+  const pdfMatch = uri.match(/^paperweave:\/\/papers\/([^/]+)\/pdf$/);
+  if (pdfMatch) return readPdfResource(pdfMatch[1]);
+  if (uri === 'paperweave://guide') return { mimeType: 'text/markdown', text: '# PaperWeave 科研助理\n\n' + SERVER_INSTRUCTIONS + '\n\n工作顺序：列出或定位论文 → 读取元数据、正文、批注 → 核对图谱与引用方向 → 给出带页码的分析 → 按用户意图保存笔记或高亮。原文检索返回的 quads 是近似坐标，高亮前应核对上下文。' };
+  if (uri === 'paperweave://all-papers' || uri === 'paperweave://all-links') {
+    const data = await callApi('GET', uri.endsWith('papers') ? '/api/papers/all' : '/api/links/all');
+    if (data.__error) return data;
+    return { mimeType: 'application/json', text: JSON.stringify(data, null, 2) };
+  }
+  const pageMatch = uri.match(/^paperweave:\/\/papers\/([^/]+)\/pages\/(\d+)$/);
+  if (pageMatch) {
+    const data = await callApi('GET', '/api/papers/' + encodeURIComponent(pageMatch[1]) + '/text?startPage=' + pageMatch[2] + '&pageCount=1');
+    if (data.__error) return data;
+    if (!data.pages.length) return { __error: '页码超出范围：' + pageMatch[2] };
+    return { mimeType: 'text/plain', text: data.pages[0].text };
+  }
   const m = uri.match(/^paperweave:\/\/(papers|graph)(?:\/([^/]+)(?:\/(notes|annotations))?)?$/);
   if (!m) return { __error: '未知资源 URI：' + uri };
   const [, kind, id, sub] = m;
@@ -518,17 +687,17 @@ async function readResource(uri) {
     return { mimeType: 'application/json', text: JSON.stringify(data, null, 2) };
   }
   if (kind === 'papers' && id && !sub) {
-    const data = await callApi('GET', '/api/papers/' + id);
+    const data = await callApi('GET', '/api/papers/' + encodeURIComponent(id));
     if (data.__error) return data;
     return { mimeType: 'application/json', text: JSON.stringify(data, null, 2) };
   }
   if (kind === 'papers' && id && sub === 'notes') {
-    const data = await callApi('GET', '/api/papers/' + id);
+    const data = await callApi('GET', '/api/papers/' + encodeURIComponent(id));
     if (data.__error) return data;
     return { mimeType: 'text/markdown', text: data.notes || '（暂无笔记）' };
   }
   if (kind === 'papers' && id && sub === 'annotations') {
-    const data = await callApi('GET', '/api/papers/' + id + '/annotations');
+    const data = await callApi('GET', '/api/papers/' + encodeURIComponent(id) + '/annotations');
     if (data.__error) return data;
     return { mimeType: 'application/json', text: JSON.stringify(data, null, 2) };
   }
@@ -558,6 +727,19 @@ const PROMPT_LIST = [
       { name: 'source', description: '本机 PDF 绝对路径或下载链接（支持 arXiv 页面）', required: true },
     ],
   },
+  {
+    name: 'paperweave_research_insights',
+    description: '围绕研究问题寻找跨论文关联、矛盾、证据缺口和后续实验方向。',
+    arguments: [{ name: 'question', description: '研究问题或主题', required: true }],
+  },
+  {
+    name: 'paperweave_highlight_interests',
+    description: '按用户兴趣从原文推荐并定位值得高亮的段落。',
+    arguments: [
+      { name: 'paper', description: '论文 id 或标题关键词', required: true },
+      { name: 'interests', description: '用户关注的方法、结论或主题', required: true },
+    ],
+  },
 ];
 
 function getPrompt(name, args) {
@@ -566,18 +748,18 @@ function getPrompt(name, args) {
   if (name === 'paperweave_read_paper') {
     return wrap(`请使用 paperweave 的 MCP 工具精读论文「${a.paper || ''}」并产出阅读报告。步骤：
 1. 用 paperweave_list_papers（query 过滤）找到目标论文，若给出的是 id 可直接 paperweave_get_paper。
-2. 读取 paperweave_list_annotations 查看已有高亮与便利贴；读取资源 paperweave://papers/{id}/notes 查看已有笔记。
-3. 结合论文标题、摘要（abstract）、批注与笔记，产出结构化阅读报告：研究问题、核心方法、关键创新、实验结论、局限性、值得跟进的方向。
-4. 用 paperweave_update_paper 把报告要点追加写入该论文的 notes（Markdown，保留原有内容）。
-5. 最后用 paperweave_list_links 报告它的引用（它引用了谁）与被引（谁引用了它）情况。`);
+2. 读取 paperweave_list_annotations 与现有 notes，使用 paperweave_read_pages 按 nextPage 逐页阅读正文，特别核对方法、实验与结论；扫描件无文本时说明限制。
+3. 结合原文证据产出结构化阅读报告：研究问题、核心方法、关键创新、实验结论、局限性、值得跟进的方向。关键论断标注论文 id 与 PDF 页码，明确区分原文和你的推断。
+4. 如用户希望保存，用 paperweave_update_paper 把报告追加写入 notes，保留原内容。
+5. 用 paperweave_get_graph 核对它引用了谁及谁引用它，说明关联依据。`);
   }
   if (name === 'paperweave_literature_review') {
     return wrap(`请使用 paperweave 的 MCP 工具围绕主题「${a.topic || ''}」做小型文献综述。步骤：
 1. 用 paperweave_list_papers（query 多次换关键词）检索库内相关论文。
-2. 对每篇相关论文用 paperweave_get_paper 读取摘要与笔记。
-3. 用 paperweave_get_graph 分析这些论文之间的引用关系（谁引用谁、哪些是核心节点）。
-4. 产出综述：主题脉络、各论文定位与贡献、方法对比、研究空白。
-5. 把综述以 Markdown 写入主题最相关论文的 notes（paperweave_update_paper），并在回复中给出全文。`);
+2. 对相关论文用 paperweave_get_paper 读取摘要与笔记，再用 paperweave_read_pages 阅读关键正文页；必要时用 paperweave_find_text 定位主张。
+3. 用 paperweave_get_graph 分析引用方向、共同参考文献、研究路线与可能的矛盾。
+4. 产出综述：主题脉络、论文贡献对比、证据强弱、研究空白；每条重要结论附论文 id 与页码，推断须明确标出。
+5. 只有用户希望保存时，才用 paperweave_update_paper 追加 Markdown 笔记。`);
   }
   if (name === 'paperweave_import_and_link') {
     return wrap(`请使用 paperweave 的 MCP 工具导入论文「${a.source || ''}」并接入引用网络。步骤：
@@ -585,6 +767,12 @@ function getPrompt(name, args) {
 2. 导入后用 paperweave_get_paper 检查自动提取的元数据（标题/作者/年份/DOI），缺失时用 paperweave_update_paper 补全。
 3. 用 paperweave_auto_match_refs 离线匹配库内参考文献建边；有网络时用 paperweave_fetch_refs 进一步抓取引用与被引。
 4. 用 paperweave_get_graph 查看新的引用网络，报告：该论文引用了库内哪些论文、被库内哪些论文引用、与哪些论文互引。`);
+  }
+  if (name === 'paperweave_research_insights') {
+    return wrap(`请围绕「${a.question || ''}」使用 PaperWeave 做研究洞察：先用 paperweave_list_all_papers 和 paperweave_list_all_links 找到跨库相关论文；读取相关论文的摘要、批注与关键正文页；用 paperweave_get_graph 核对引用方向。寻找共同来源、方法差异、互相矛盾的结果与尚缺的证据，提出可验证的研究问题。每条洞察附论文 id、页码和证据摘述；明确标明推断，不把相关性写成因果。`);
+  }
+  if (name === 'paperweave_highlight_interests') {
+    return wrap(`请在论文「${a.paper || ''}」中围绕用户兴趣「${a.interests || ''}」寻找值得标注的亮点。用 paperweave_get_paper 与 paperweave_list_annotations 了解背景和已有标注，再用 paperweave_read_pages 逐页阅读。列出少量候选原文、页码及对用户有用的原因；调用 paperweave_find_text 核对原文与上下文并取得 quads。只有用户要求保存高亮时，才用 paperweave_add_annotation 写入 type=highlight、page、quads、text、comment；不要凭空猜测坐标或重复标注。`);
   }
   return { __error: '未知提示模板：' + name };
 }
@@ -606,6 +794,7 @@ async function handleMessage(msg) {
         protocolVersion: PROTOCOL_VERSIONS.has(clientVer) ? clientVer : '2025-06-18',
         capabilities: { tools: {}, resources: {}, prompts: {} },
         serverInfo: SERVER_INFO,
+        instructions: SERVER_INSTRUCTIONS,
       },
     });
     return;
@@ -645,7 +834,7 @@ async function handleMessage(msg) {
     if (r.__error) {
       send({ jsonrpc: '2.0', id, error: { code: -32002, message: r.__error } });
     } else {
-      send({ jsonrpc: '2.0', id, result: { contents: [{ uri, mimeType: r.mimeType, text: r.text }] } });
+      send({ jsonrpc: '2.0', id, result: { contents: [{ uri, mimeType: r.mimeType, ...(r.blob ? { blob: r.blob } : { text: r.text }) }] } });
     }
     return;
   }

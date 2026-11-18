@@ -108,12 +108,15 @@ async function main() {
     check('initialize 握手', init.result && init.result.serverInfo.name === 'paperweave', JSON.stringify(init.result && init.result.serverInfo));
     check('协议版本协商', ['2025-06-18', '2025-03-26', '2024-11-05'].includes(init.result.protocolVersion), init.result.protocolVersion);
     check('capabilities 声明 tools/resources/prompts', !!(init.result.capabilities.tools && init.result.capabilities.resources && init.result.capabilities.prompts));
+    check('握手提供科研助理指引', /页码/.test(init.result.instructions || '') && /引用方向/.test(init.result.instructions || ''));
     mcp.notify('notifications/initialized');
 
     // 4. tools/list
     const list = await mcp.request('tools/list');
     const names = (list.result.tools || []).map(t => t.name);
-    check('tools/list 返回 25 个工具', names.length === 25, names.length + ' 个');
+    check('tools/list 返回 35 个工具', names.length === 35, names.length + ' 个');
+    check('正文阅读与原文定位工具存在', names.includes('paperweave_read_pages') && names.includes('paperweave_find_text'));
+    check('单条批注与跨库工具存在', names.includes('paperweave_update_annotation') && names.includes('paperweave_delete_annotation') && names.includes('paperweave_list_all_papers') && names.includes('paperweave_list_all_links'));
     check('拆分工具存在', names.includes('paperweave_fetch_references') && names.includes('paperweave_fetch_citations'));
     check('下载工具存在', names.includes('paperweave_download_ref') && names.includes('paperweave_download_all_refs'));
     check('库管理工具存在', names.includes('paperweave_list_libraries') && names.includes('paperweave_create_library') && names.includes('paperweave_switch_library') && names.includes('paperweave_update_library') && names.includes('paperweave_reorder_libraries'));
@@ -132,6 +135,12 @@ async function main() {
 
     r = await mcp.callTool('paperweave_list_papers', { query: 'bert' });
     check('list_papers query 过滤', r.data.length === 1 && /BERT/.test(r.data[0].title));
+    r = await mcp.callTool('paperweave_list_all_papers');
+    check('list_all_papers 返回归属', !r.error && r.data.length === 6 && r.data.every(p => Array.isArray(p.libraryIds)));
+    r = await mcp.callTool('paperweave_read_pages', { paperId: attention.id, startPage: 1, pageCount: 2 });
+    check('read_pages 提取正文与续页', !r.error && r.data.pages.length === 2 && /Attention/i.test(r.data.pages[0].text) && r.data.nextPage === 3);
+    r = await mcp.callTool('paperweave_find_text', { paperId: attention.id, query: 'Attention', pageCount: 2 });
+    check('find_text 定位高亮坐标', !r.error && r.data.matches.some(hit => hit.page === 1 && hit.quads.length));
 
     // 6. 详情 / 更新
     r = await mcp.callTool('paperweave_update_paper', { id: attention.id, notes: '# MCP 笔记', tags: ['mcp'] });
@@ -151,6 +160,11 @@ async function main() {
     check('add_annotation 追加便利贴', !r.error && r.data.length === 1);
     r = await mcp.callTool('paperweave_list_annotations', { paperId: attention.id });
     check('list_annotations', r.data.length === 1 && r.data[0].comment === 'MCP 便利贴');
+    const annotationId = r.data[0].id;
+    r = await mcp.callTool('paperweave_update_annotation', { paperId: attention.id, annotationId, comment: '更新便利贴' });
+    check('update_annotation 定点修改', !r.error && r.data.comment === '更新便利贴');
+    r = await mcp.callTool('paperweave_delete_annotation', { paperId: attention.id, annotationId });
+    check('delete_annotation 定点删除', !r.error && r.data.deleted === true);
     r = await mcp.callTool('paperweave_set_annotations', { paperId: attention.id, annotations: [] });
     check('set_annotations 清空', !r.error && r.data.length === 0);
 
@@ -158,6 +172,8 @@ async function main() {
     for (const p of papers) await mcp.callTool('paperweave_auto_match_refs', { paperId: p.id });
     r = await mcp.callTool('paperweave_list_links');
     check('auto_match + list_links ≥5 条边', r.data.length >= 5, 'links=' + r.data.length);
+    r = await mcp.callTool('paperweave_list_all_links');
+    check('list_all_links 包含各库原始关联', !r.error && r.data.length >= 5 && r.data.every(link => link.libraryLinks?.length));
 
     const resnet = papers.find(p => /Residual/.test(p.title));
     r = await mcp.callTool('paperweave_add_link', { from: resnet.id, to: attention.id });
@@ -174,12 +190,27 @@ async function main() {
     let fc = await mcp.callTool('paperweave_fetch_citations', { paperId: attention.id });
     if (!fc.error) check('fetch_citations 抓取被引', fc.data.citeCount >= 0, `source=${fc.data.source} added=${fc.data.added}`);
     else check('fetch_citations [网络不可用，跳过]', true, fc.error);
+    r = await mcp.callTool('paperweave_get_fetch_progress', { paperId: attention.id });
+    check('get_fetch_progress 查询抓取状态', !r.error && typeof r.data === 'object');
+    r = await mcp.callTool('paperweave_import_web', {});
+    check('import_web 缺少地址返回可读错误', !!r.error && /url/.test(r.error), r.error || '');
 
     // 8.5 Resources
     let rr = await mcp.request('resources/list');
-    check('resources/list 返回 2 个资源', rr.result.resources.length === 2);
+    check('resources/list 返回 5 个资源', rr.result.resources.length === 5);
     rr = await mcp.request('resources/templates/list');
-    check('resources/templates/list 返回 3 个模板', rr.result.resourceTemplates.length === 3);
+    check('resources/templates/list 返回 5 个模板', rr.result.resourceTemplates.length === 5);
+    rr = await mcp.request('resources/read', { uri: 'paperweave://guide' });
+    check('科研助理指南资源', rr.result && rr.result.contents[0].text.includes('页码'));
+    rr = await mcp.request('resources/read', { uri: 'paperweave://all-papers' });
+    check('跨库论文资源', rr.result && JSON.parse(rr.result.contents[0].text).length === 6);
+    rr = await mcp.request('resources/read', { uri: 'paperweave://all-links' });
+    check('跨库引用资源', rr.result && JSON.parse(rr.result.contents[0].text).length >= 5);
+    rr = await mcp.request('resources/read', { uri: `paperweave://papers/${attention.id}/pages/1` });
+    check('PDF 单页正文资源', rr.result && /Attention/i.test(rr.result.contents[0].text));
+    rr = await mcp.request('resources/read', { uri: `paperweave://papers/${attention.id}/pdf` });
+    check('PDF 原文件二进制资源', rr.result && rr.result.contents[0].mimeType === 'application/pdf'
+      && Buffer.from(rr.result.contents[0].blob, 'base64').subarray(0, 5).toString('latin1') === '%PDF-');
     rr = await mcp.request('resources/read', { uri: 'paperweave://papers' });
     check('读取资源 papers 列表', rr.result && JSON.parse(rr.result.contents[0].text).length === 6);
     rr = await mcp.request('resources/read', { uri: `paperweave://papers/${attention.id}` });
@@ -195,13 +226,17 @@ async function main() {
 
     // 8.6 Prompts
     let pr = await mcp.request('prompts/list');
-    check('prompts/list 返回 3 个模板', pr.result.prompts.length === 3, pr.result.prompts.map(p => p.name).join(','));
+    check('prompts/list 返回 5 个模板', pr.result.prompts.length === 5, pr.result.prompts.map(p => p.name).join(','));
     pr = await mcp.request('prompts/get', { name: 'paperweave_read_paper', arguments: { paper: 'Attention' } });
     check('prompts/get 阅读模板含主题与步骤', pr.result && pr.result.messages.length === 1 && pr.result.messages[0].content.text.includes('Attention') && pr.result.messages[0].content.text.includes('paperweave_update_paper'));
     pr = await mcp.request('prompts/get', { name: 'paperweave_literature_review', arguments: { topic: 'Transformer' } });
     check('prompts/get 综述模板', pr.result && pr.result.messages[0].content.text.includes('Transformer'));
     pr = await mcp.request('prompts/get', { name: 'paperweave_import_and_link', arguments: { source: 'https://arxiv.org/abs/1706.03762' } });
     check('prompts/get 导入模板', pr.result && pr.result.messages[0].content.text.includes('arxiv.org'));
+    pr = await mcp.request('prompts/get', { name: 'paperweave_research_insights', arguments: { question: '注意力机制' } });
+    check('洞察模板要求证据与页码', pr.result && pr.result.messages[0].content.text.includes('注意力机制') && pr.result.messages[0].content.text.includes('页码'));
+    pr = await mcp.request('prompts/get', { name: 'paperweave_highlight_interests', arguments: { paper: 'Attention', interests: '实验结论' } });
+    check('兴趣高亮模板需原文定位', pr.result && pr.result.messages[0].content.text.includes('paperweave_find_text'));
     pr = await mcp.request('prompts/get', { name: 'no_such_prompt', arguments: {} });
     check('未知提示模板返回错误', !!pr.error, pr.error && pr.error.message);
 
@@ -226,8 +261,12 @@ async function main() {
     check('switch_library', !r.error && r.data.current === tmpLib);
     r = await mcp.callTool('paperweave_list_papers');
     check('切换后新库为空', !r.error && r.data.length === 0, 'papers=' + r.data.length);
+    r = await mcp.callTool('paperweave_add_to_library', { paperId: attention.id, libraryId: tmpLib });
+    check('add_to_library 复用已有论文', !r.error && r.data.libraryIds.includes(tmpLib));
     r = await mcp.callTool('paperweave_switch_library', { id: defLib });
     check('切回默认库', !r.error && r.data.current === defLib);
+    r = await mcp.callTool('paperweave_delete_library', { id: tmpLib });
+    check('delete_library 删除临时库', !r.error);
 
     // 10. status
     r = await mcp.callTool('paperweave_status');

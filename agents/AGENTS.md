@@ -6,7 +6,7 @@
 
 - 应用：PaperWeave（跨平台论文阅读器，Windows / macOS / Linux）
 - 接口形式：本地 HTTP JSON API（`127.0.0.1`，仅本机回环）+ MCP stdio Server（`paperweave-mcp.js`）
-- API 版本：`9`（鉴权头 `X-PaperWeave-Token`，下载失败原因持久化并支持按条目重试）
+- API 版本：`10`（鉴权头 `X-PaperWeave-Token`；PDF 正文读取与定位、定点批注和跨库查询）
 
 > **0.8.0 多论文库架构**：论文本体全局统一存储（每篇论文唯一 id，PDF 内容哈希命名共享一份文件），
 > 论文库（library）只记录「包含哪些论文 id + 库内引用关联」。批注 / 笔记 / 评星随论文全局保存。
@@ -36,7 +36,7 @@
 
 连接自发现顺序：`PAPERWEAVE_AGENT_API_JSON` 环境变量 → 脚本同目录 `paperweave-agent-api.json` → 平台数据目录 `paperweave/paperweave-data/agent-api.json`。
 
-### 25 个工具（与 HTTP API 一一对应）
+### 35 个工具（与 HTTP API 一一对应）
 
 | 工具 | 说明 |
 | --- | --- |
@@ -65,9 +65,21 @@
 | `paperweave_switch_library` | 切换当前论文库 |
 | `paperweave_update_library` | 更新论文库名称 / 简介 / 标志图标（emoji）/ 置顶 |
 | `paperweave_reorder_libraries` | 按 id 顺序重排论文库 |
+| `paperweave_list_all_papers` | 跨库列出全部论文与 `libraryIds` |
+| `paperweave_read_pages` | 按页读取 PDF 正文，返回 `nextPage` 供续读 |
+| `paperweave_find_text` | 检索 PDF 原文，返回页码、上下文和近似高亮坐标 |
+| `paperweave_update_annotation` | 按 id 修改一条批注 |
+| `paperweave_delete_annotation` | 按 id 删除一条批注 |
+| `paperweave_list_all_links` | 跨库汇总引用边和各库原始边 id |
+| `paperweave_add_to_library` | 将已有论文加入指定库 |
+| `paperweave_delete_library` | 删除指定论文库 |
+| `paperweave_get_fetch_progress` | 读取引用抓取 / 下载进度 |
+| `paperweave_import_web` | 从网页 PDF 地址导入并补空白元数据 |
 
 参数与返回结构同第 3 节 HTTP API（`tools/call` 的 `arguments` 对应 Body / Query，
 返回 `content[0].text` 为 JSON 文本，错误时 `isError: true`）。
+
+握手结果的 `instructions` 会向支持该字段的 MCP 宿主说明取证、页码引用、关联分析与高亮定位原则；宿主是否把它提供给模型由宿主决定。`paperweave://guide` 和提示模板提供可主动读取的同一套工作流。
 
 ### MCP Resources（可直接挂入 Agent 上下文）
 
@@ -78,6 +90,11 @@
 | `paperweave://papers/{id}/notes` | `text/markdown` | 单篇论文的 Markdown 笔记 |
 | `paperweave://papers/{id}/annotations` | `application/json` | 单篇论文的高亮与便利贴 |
 | `paperweave://graph` | `application/json` | 引用图谱快照（nodes + edges） |
+| `paperweave://guide` | `text/markdown` | 科研助理工作准则 |
+| `paperweave://all-papers` | `application/json` | 跨库全部论文 |
+| `paperweave://all-links` | `application/json` | 跨库引用边 |
+| `paperweave://papers/{id}/pages/{page}` | `text/plain` | PDF 指定页的提取文本 |
+| `paperweave://papers/{id}/pdf` | `application/pdf` | 原始 PDF 的 base64 二进制资源；MCP 端限制 64 MiB，更大文件可走 HTTP PDF 接口 |
 
 ### MCP Prompts（一键工作流模板）
 
@@ -86,6 +103,8 @@
 | `paperweave_read_paper` | `paper`（id 或标题关键词） | 精读论文：拉元数据/批注/笔记 → 结构化阅读报告 → 回写 notes → 报告引用与被引 |
 | `paperweave_literature_review` | `topic` | 文献综述：检索库内相关论文 → 分析引用网络 → 产出综述并回写 |
 | `paperweave_import_and_link` | `source`（PDF 路径或 URL） | 导入 → 补全元数据 → 建引用边 → 报告与库内论文的关系 |
+| `paperweave_research_insights` | `question` | 跨论文寻找关联、差异、证据缺口与可验证的问题 |
+| `paperweave_highlight_interests` | `paper`、`interests` | 依据用户兴趣找原文亮点，用检索结果定位后按需高亮 |
 
 ---
 
@@ -131,7 +150,7 @@ PaperWeave Connector 无需用户手动复制令牌或确认授权：插件自�
 
 ```bash
 curl http://127.0.0.1:24680/api/ping
-# {"ok":true,"name":"PaperWeave","version":"1.4.0","api":9}
+# {"ok":true,"name":"PaperWeave","version":"1.5.0","api":10}
 ```
 
 ---
@@ -205,7 +224,7 @@ curl http://127.0.0.1:24680/api/ping
 
 ```bash
 curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/status
-# {"ok":true,"data":{"version":"1.4.0","papers":6,"links":9,"annotations":3,"libraryDir":"..."}}
+# {"ok":true,"data":{"version":"1.5.0","papers":6,"links":9,"annotations":3,"libraryDir":"..."}}
 ```
 
 ### 3.2 论文库（多库管理，0.8.0+）
@@ -218,6 +237,7 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/status
 | POST | `/api/libraries/reorder` | 拖拽排序持久化：`{ "ids": ["lib_a", "lib_b"] }` |
 | POST | `/api/libraries/current` | 切换当前库 `{ "id": "lib_xxx" }`；之后所有论文/图谱/导入接口都作用于该库 |
 | DELETE | `/api/libraries/{id}` | 删除论文库（至少保留一个；论文本体保留在全局存储中） |
+| POST | `/api/libraries/{id}/papers` | 将全局已有论文加入该库：`{ "paperId": "p_xxx" }`；返回所属 `libraryIds` |
 
 > 首个初始默认论文库在任何语言下都命名为 `New Weave`。
 
@@ -225,11 +245,14 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/status
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/papers` | 列出全部论文 |
+| GET | `/api/papers` | 列出当前论文库的论文 |
+| GET | `/api/papers/all` | 列出全局全部论文，含未入库论文与 `libraryIds` |
 | GET | `/api/papers/{id}` | 论文详情（含 notes） |
 | PATCH | `/api/papers/{id}` | 更新字段：`title / authors / year / venue / doi / abstract / tags / notes / favorite / lastPage / rating / externalRefs` |
 | DELETE | `/api/papers/{id}?deleteFile=1` | 删除论文及其批注、关联；`deleteFile=0` 保留库内 PDF |
 | GET | `/api/papers/{id}/pdf` | 下载论文 PDF 原始字节（`application/pdf`） |
+| GET | `/api/papers/{id}/text?startPage=1&pageCount=3` | 提取 PDF 正文，最多 10 页 / 次、每页最多 20000 字符；返回 `pages[]`、`pageCount`、`nextPage`，扫描件可能为空 |
+| GET | `/api/papers/{id}/find-text?query=...&startPage=1&pageCount=30` | 查找原文短语，最多扫描 50 页 / 次、返回 30 处；含页码、上下文、近似归一化 `quads`、`nextPage` |
 
 ```bash
 # 更新笔记（Markdown）
@@ -259,6 +282,8 @@ curl -X POST -H "X-PaperWeave-Token: $TOKEN" -H "Content-Type: application/json"
 | GET | `/api/papers/{id}/annotations` | 读取该论文全部批注 |
 | POST | `/api/papers/{id}/annotations` | 追加批注（单条对象或数组），字段见数据模型；`id` 自动生成 |
 | PUT | `/api/papers/{id}/annotations` | 全量替换（数组），可用于修改/删除既有批注 |
+| PATCH | `/api/papers/{id}/annotations/{annotationId}` | 修改单条批注的评论、`#RRGGBB` 颜色、文本或归一化位置，校验坐标并保留其他批注 |
+| DELETE | `/api/papers/{id}/annotations/{annotationId}` | 删除单条批注，保留其他批注 |
 
 ```bash
 # 在第 2 页放一张便利贴
@@ -272,6 +297,7 @@ curl -X POST -H "X-PaperWeave-Token: $TOKEN" -H "Content-Type: application/json"
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/links` | 全部引用边 |
+| GET | `/api/links/all` | 跨库引用边，按 `from/to` 去重，`libraryLinks` 保留各库原始 id |
 | POST | `/api/links` | 新增 `{ "from": "p_a", "to": "p_b" }`（含义：p_a 引用了 p_b） |
 | DELETE | `/api/links/{linkId}` | 删除一条边 |
 | POST | `/api/papers/{id}/fetch-references` | 抓取"引用"：优先 Semantic Scholar 结构化参考文献（分页拉取 ≤500 条，含标题/DOI/arXiv/作者/被引数），未收录时回退 PDF 参考文献段落逐条检索（DOI(CrossRef)/arXiv/S2标题匹配/OpenAlex）；支持编号及无编号参考文献、机构作者与附录截断；未入库条目存入 `externalRefs`（dir=out）；响应含 `source`、`unresolved`（≤20 条）与 `external`（未入库数量） |
@@ -325,8 +351,11 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/graph
 ## 4. 典型 Agent 工作流
 
 1. **建立论文库**：`import-path` 批量导入 → 对每篇 `auto-match` 建边 → `graph` 查看网络。
-2. **阅读助理**：`papers` 检索目标 → `pdf` 取原文自行解析 → 以 `annotations` 回写高亮与便利贴 → `PATCH notes` 写阅读笔记。
-3. **文献综述**：`graph` 取引用网络 → 对关键论文 `fetch-refs` 扩充关系 → 生成综述后写回 `notes`。
+2. **阅读助理**：`papers` 找目标 → `text` 按 `nextPage` 逐页阅读 → 对照批注、摘要与笔记 → 以论文 id、页码给出方法、结果与局限；用户希望保存时追加 `notes`。
+3. **关联与洞察**：`all-papers`、`all-links` 与 `graph` 看跨库脉络 → 对关键论文读取正文 → 区分明确引用与基于共同文献的推断，提出可验证的研究问题。
+4. **兴趣高亮**：按用户主题选择少量原文 → `find-text` 核对上下文与页码 → 取得 `quads` 后再 `POST annotations`，不要臆造坐标；已存在的批注用单条 PATCH 修改。
+
+科研助理应先从用户问题、已有笔记、标签、评星和批注判断关注点。阅读报告把“论文实际报告的结果”和“基于多篇论文的推断”分开；引用关系始终按 `from` 引用了 `to` 解释。重要结论尽量给出论文 id、PDF 页码与简短原文依据；无法从扫描件提取正文时明确说明，不以摘要代替全文。比较论文时同时检查方法、数据集、指标和局限，再提出可验证的假设。保存总结时先读原笔记并追加，避免覆盖；推荐高亮应少而精，并核对检索结果的上下文与坐标。
 
 ## 5. 错误码
 
@@ -343,6 +372,7 @@ curl -H "X-PaperWeave-Token: $TOKEN" http://127.0.0.1:24680/api/graph
 
 | API 版本 | PaperWeave | 变更 |
 | --- | --- | --- |
+| 10 | 1.5.0 | 新增 PDF 逐页正文与原文定位、跨库论文/引用列表、已有论文直接入库、单条批注修改/删除；MCP 增至 35 个工具，增加科研助理握手指引、资源与洞察/兴趣高亮提示 |
 | 1 | 0.1.0 | 首个版本：论文库、导入、批注、笔记、引用关联、图谱 |
 | 1（HTTP 不变） | 0.1.0 | 新增 MCP stdio Server 包装（`paperweave-mcp.js`，16 个工具） |
 | 1（HTTP 不变） | 0.1.0 | MCP 新增 5 个 Resources 与 3 个 Prompt 模板 |

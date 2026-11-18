@@ -74,7 +74,7 @@ async function main() {
     // 探活与鉴权
     const ping = await req(base, 'GET', '/api/ping');
     check('ping 无需令牌', ping.status === 200 && ping.json.ok);
-    check('API 版本 9（下载失败原因与可重试条目）', ping.json.api === 9, 'api=' + ping.json.api);
+    check('API 版本 10（论文正文与定点批注）', ping.json.api === 10, 'api=' + ping.json.api);
     const noAuth = await req(base, 'GET', '/api/papers');
     check('无令牌被拒绝 401', noAuth.status === 401);
     const badAuth = await req(base, 'GET', '/api/papers', null, 'wrong-token');
@@ -95,6 +95,8 @@ async function main() {
     const attention = papers.find(p => /Attention Is All You Need/.test(p.title));
     const bert = papers.find(p => /BERT/.test(p.title));
     check('导入后元数据完整', attention && attention.doi.includes('10.48550'), attention && attention.doi);
+    r = await req(base, 'GET', '/api/papers/all', null, tk);
+    check('跨库论文列表包含归属', r.json.ok && r.json.data.length === 6 && r.json.data.every(p => Array.isArray(p.libraryIds) && !('refText' in p)));
 
     // 重复导入去重
     r = await req(base, 'POST', '/api/papers/import-path', { path: files[0] }, tk);
@@ -113,6 +115,12 @@ async function main() {
     // PDF 字节下载
     r = await req(base, 'GET', `/api/papers/${attention.id}/pdf`, null, tk, true);
     check('下载 PDF 字节', r.status === 200 && r.type === 'application/pdf' && r.buf.slice(0, 5).toString('latin1') === '%PDF-', 'bytes=' + r.buf.length);
+    r = await req(base, 'GET', `/api/papers/${attention.id}/text?startPage=1&pageCount=2`, null, tk);
+    check('逐页读取 PDF 正文', r.json.ok && r.json.data.pages.length === 2 && /Attention/i.test(r.json.data.pages[0].text) && r.json.data.nextPage === 3);
+    r = await req(base, 'GET', `/api/papers/${attention.id}/find-text?query=Attention&pageCount=2`, null, tk);
+    check('原文检索返回页码与高亮坐标', r.json.ok && r.json.data.matches.some(hit => hit.page === 1 && hit.quads.length && hit.quads[0].x >= 0 && hit.quads[0].x <= 1));
+    r = await req(base, 'GET', `/api/papers/${attention.id}/text?pageCount=11`, null, tk);
+    check('正文接口拒绝超量页数', r.status === 400);
 
     // 元数据与笔记
     r = await req(base, 'PATCH', `/api/papers/${attention.id}`, { notes: '# Agent 笔记\n- 自回归测试', tags: ['agent', 'test'] }, tk);
@@ -135,6 +143,13 @@ async function main() {
     r = await req(base, 'GET', `/api/papers/${attention.id}/annotations`, null, tk);
     check('GET 批注列表', r.json.data.length === 2 && r.json.data.some(a => a.comment === 'Agent 便利贴'));
     const keep = r.json.data.filter(a => a.type === 'highlight');
+    const stickyId = r.json.data.find(a => a.type === 'sticky').id;
+    r = await req(base, 'PATCH', `/api/papers/${attention.id}/annotations/${keep[0].id}`, { color: '#7bf1a8', comment: '修改后的高亮' }, tk);
+    check('PATCH 定点修改高亮', r.json.ok && r.json.data.color === '#7bf1a8' && r.json.data.comment === '修改后的高亮');
+    r = await req(base, 'PATCH', `/api/papers/${attention.id}/annotations/${keep[0].id}`, { color: 'invalid' }, tk);
+    check('PATCH 拒绝无效高亮颜色', r.status === 400 && !r.json.ok);
+    r = await req(base, 'DELETE', `/api/papers/${attention.id}/annotations/${stickyId}`, null, tk);
+    check('DELETE 定点删除便利贴', r.json.ok && r.json.data.deleted === true);
     r = await req(base, 'PUT', `/api/papers/${attention.id}/annotations`, keep, tk);
     check('PUT 全量替换批注（删除便利贴）', r.json.ok && r.json.data.length === 1);
 
@@ -142,6 +157,8 @@ async function main() {
     for (const p of papers) await req(base, 'POST', `/api/papers/${p.id}/auto-match`, null, tk);
     r = await req(base, 'GET', '/api/links', null, tk);
     check('离线匹配建立引用边 ≥5', r.json.ok && r.json.data.length >= 5, 'links=' + r.json.data.length);
+    r = await req(base, 'GET', '/api/links/all', null, tk);
+    check('跨库关联列表保留原始关联 id', r.json.ok && r.json.data.length >= 5 && r.json.data.every(link => link.libraryLinks?.length));
 
     // 手动关联
     const resnet = papers.find(p => /Residual/.test(p.title));
@@ -229,6 +246,8 @@ async function main() {
     r = await req(base, 'POST', '/api/papers/import-path', { path: path.join(ROOT, 'assets', 'samples', 'attention.pdf') }, tk);
     check('跨库导入复用同一论文 id', r.json.ok && r.json.data[0].reused === true && r.json.data[0].paper.id === attention.id,
       JSON.stringify({ reused: r.json.data[0] && r.json.data[0].reused, same: r.json.data[0] && r.json.data[0].paper && r.json.data[0].paper.id === attention.id }));
+    r = await req(base, 'POST', `/api/libraries/${reviewLibId}/papers`, { paperId: bert.id }, tk);
+    check('已有论文直接加入指定论文库', r.json.ok && r.json.data.libraryIds.includes(reviewLibId));
     // DOI 冲突（同 DOI 不同内容）：auto 策略自动合并复用
     const variantPath = path.join(testDataDir, 'attention-variant.pdf');
     fs.writeFileSync(variantPath, Buffer.concat([fs.readFileSync(path.join(ROOT, 'assets', 'samples', 'attention.pdf')), Buffer.from('\n% variant')]));

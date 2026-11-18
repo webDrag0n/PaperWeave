@@ -55,7 +55,7 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
 
     // 公共探活
     if (u.pathname === '/api/ping') {
-      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 9 });
+      return json(res, 200, { ok: true, name: 'PaperWeave', version: appVersion, api: 10 });
     }
 
     // 浏览器插件配对：仅扩展来源可发起，必须由桌面端明确批准。
@@ -130,6 +130,13 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
         onChanged();
         return json(res, okSwitch ? 200 : 404, okSwitch ? { ok: true, data: { current: store.currentLibraryId() } } : { ok: false, error: '论文库不存在' });
       }
+      if (parts[0] === 'api' && parts[1] === 'libraries' && parts[2] && parts[3] === 'papers' && m === 'POST') {
+        const body = JSON.parse((await readBody(req)).toString('utf-8') || '{}');
+        if (!store.getLibrary(parts[2]) || !store.getPaper(body.paperId)) return json(res, 404, { ok: false, error: '论文库或论文不存在' });
+        store.addToLibrary(body.paperId, parts[2]);
+        onChanged();
+        return json(res, 200, { ok: true, data: { paperId: body.paperId, libraryIds: store.paperInLibraries(body.paperId) } });
+      }
       if (parts[0] === 'api' && parts[1] === 'libraries' && parts[2] && m === 'DELETE') {
         const ok = store.deleteLibrary(parts[2]);
         onChanged();
@@ -139,6 +146,9 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
       // ---------- 论文 ----------
       if (u.pathname === '/api/papers' && m === 'GET') {
         return json(res, 200, { ok: true, data: store.listPapers() });
+      }
+      if (u.pathname === '/api/papers/all' && m === 'GET') {
+        return json(res, 200, { ok: true, data: store.listAllPapers() });
       }
       if (u.pathname === '/api/papers/import-path' && m === 'POST') {
         const body = JSON.parse((await readBody(req)).toString('utf-8') || '{}');
@@ -230,6 +240,53 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
           res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': buf.length, ...CORS_HEADERS });
           return res.end(buf);
         }
+        if ((parts[3] === 'text' || parts[3] === 'find-text') && m === 'GET') {
+          const startPage = Number(u.searchParams.get('startPage') || 1);
+          const pageCount = Number(u.searchParams.get('pageCount') || (parts[3] === 'text' ? 3 : 30));
+          const maxPages = parts[3] === 'text' ? 10 : 50;
+          if (!Number.isInteger(startPage) || startPage < 1 || !Number.isInteger(pageCount) || pageCount < 1 || pageCount > maxPages) {
+            return json(res, 400, { ok: false, error: `startPage 须为正整数，pageCount 须为 1-${maxPages}` });
+          }
+          const query = u.searchParams.get('query') || '';
+          if (parts[3] === 'find-text' && (!query.trim() || query.length > 200)) {
+            return json(res, 400, { ok: false, error: 'query 须为 1-200 字符' });
+          }
+          try {
+            const data = parts[3] === 'text'
+              ? await service.readPaperPages(id, startPage, pageCount)
+              : await service.findPaperText(id, query, startPage, pageCount);
+            return json(res, 200, { ok: true, data });
+          } catch (e) {
+            return json(res, e.message === 'PDF 文件缺失' ? 404 : 422, { ok: false, error: e.message });
+          }
+        }
+        if (parts[3] === 'annotations' && parts[4] && (m === 'PATCH' || m === 'DELETE')) {
+          const anns = store.getAnnotations(id);
+          const index = anns.findIndex(a => a.id === parts[4]);
+          if (index < 0) return json(res, 404, { ok: false, error: '批注不存在' });
+          if (m === 'DELETE') {
+            const next = anns.filter(a => a.id !== parts[4]);
+            store.setAnnotations(id, next);
+            onChanged();
+            return json(res, 200, { ok: true, data: { deleted: true } });
+          }
+          const body = JSON.parse((await readBody(req)).toString('utf-8') || '{}');
+          const patch = Object.fromEntries(['comment', 'color', 'text', 'quads', 'page', 'x', 'y']
+            .filter(key => Object.prototype.hasOwnProperty.call(body, key)).map(key => [key, body[key]]));
+          if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: '没有可更新的批注字段' });
+          if (['comment', 'text'].some(key => key in patch && (typeof patch[key] !== 'string' || patch[key].length > 20000))
+            || ('color' in patch && (typeof patch.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(patch.color)))
+            || ('page' in patch && (!Number.isInteger(patch.page) || patch.page < 1 || (paper.pageCount > 0 && patch.page > paper.pageCount)))
+            || ['x', 'y'].some(key => key in patch && (typeof patch[key] !== 'number' || !Number.isFinite(patch[key]) || patch[key] < 0 || patch[key] > 1))
+            || ('quads' in patch && (!Array.isArray(patch.quads) || !patch.quads.length || patch.quads.some(q => !q || ['x', 'y', 'w', 'h'].some(key => typeof q[key] !== 'number' || !Number.isFinite(q[key])) || q.x < 0 || q.y < 0 || q.w <= 0 || q.h <= 0 || q.x + q.w > 1.001 || q.y + q.h > 1.001)))) {
+            return json(res, 400, { ok: false, error: '批注字段格式或坐标无效' });
+          }
+          const next = anns.slice();
+          next[index] = { ...next[index], ...patch };
+          store.setAnnotations(id, next);
+          onChanged();
+          return json(res, 200, { ok: true, data: next[index] });
+        }
         if (parts[3] === 'annotations') {
           if (m === 'GET') return json(res, 200, { ok: true, data: store.getAnnotations(id) });
           const body = JSON.parse((await readBody(req)).toString('utf-8') || '{}');
@@ -312,6 +369,9 @@ function startAgentApi({ store, service, token, appVersion, onChanged, refsProgr
       // ---------- 引用关联 ----------
       if (u.pathname === '/api/links' && m === 'GET') {
         return json(res, 200, { ok: true, data: store.listLinks() });
+      }
+      if (u.pathname === '/api/links/all' && m === 'GET') {
+        return json(res, 200, { ok: true, data: store.listAllLinks() });
       }
       if (u.pathname === '/api/links' && m === 'POST') {
         const body = JSON.parse((await readBody(req)).toString('utf-8') || '{}');

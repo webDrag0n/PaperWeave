@@ -327,7 +327,7 @@ export class PdfViewer {
     if (!p.viewport1 || !p.noteRail) return;
     const width = p.viewport1.width * this.scale;
     const height = p.viewport1.height * this.scale;
-    p.row.style.width = (width + 220) + 'px';
+    p.row.style.width = width + 'px';
     p.noteRail.replaceChildren();
     p.noteLines.replaceChildren();
     let bottom = 0;
@@ -920,6 +920,7 @@ export class PdfViewer {
     }
     this._applyScale(this.baseScale);
     await this.renderAll();
+    this.opts.scrollEl.scrollLeft = 0;
     this.opts.onZoomChange && this.opts.onZoomChange(this.zoomRatio());
     return this.zoomRatio();
   }

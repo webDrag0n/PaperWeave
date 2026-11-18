@@ -1109,7 +1109,7 @@ async function openReader(paperId) {
   switchTab('info');
   // 恢复上次阅读位置
   if (paper.lastPage && paper.lastPage > 1 && paper.lastPage <= viewer.doc.numPages) {
-    await viewer.jumpToPage(paper.lastPage);
+    await viewer.jumpToPage(paper.lastPage, 'auto');
     toast(tf('已恢复到上次阅读位置（第 {n} 页）', { n: paper.lastPage }), false, 1800);
   }
 }
@@ -2074,7 +2074,6 @@ function bindEvents() {
   $('#btnImport').addEventListener('click', openImportModal);
   $('#btnImportEmpty').addEventListener('click', openImportModal);
   // 浏览器插件：连接信息弹窗
-  $('#btnExt').addEventListener('click', openExtModal);
   $('#extClose').addEventListener('click', () => $('#extModal').classList.add('hidden'));
   $('#extCopyUrl').addEventListener('click', () => {
     const v = $('#extConnUrl').textContent;

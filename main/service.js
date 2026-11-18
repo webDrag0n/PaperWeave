@@ -2,7 +2,7 @@
 const path = require('path');
 const fs = require('fs');
 const { net } = require('electron');
-const { extractPdfInfo, bufferIntoLibrary } = require('./importer');
+const { extractPdfInfo, bufferIntoLibrary, loadPdfjs } = require('./importer');
 const { fetchReferencesOnline, fetchCitationsOnline, matchReferencesToLibrary, splitReferenceEntries, extractArxivId, fetchArxivMeta, findRefPdfUrl } = require('./refs');
 const { createDownloadQueue } = require('./download-queue');
 const { arxivIdOf, reconcileYear } = require('./pubyear');
@@ -441,7 +441,90 @@ function createService(store, opts = {}) {
     return { ok: true, matched: matches.length, added };
   }
 
-  return { importOnePdfBuffer, importFromPaths, importFromUrl, importFromUrls, fetchRefs, fetchReferences, fetchCitations, autoMatch, downloadRef, downloadAllRefs, resolveImport };
+  async function withPaperPdf(paperId, work) {
+    const paper = store.getPaper(paperId);
+    if (!paper) throw new Error('论文不存在');
+    const file = store.paperFilePath(paper);
+    if (!file || !fs.existsSync(file)) throw new Error('PDF 文件缺失');
+    const pdfjs = await loadPdfjs();
+    const task = pdfjs.getDocument({
+      data: new Uint8Array(fs.readFileSync(file)),
+      isEvalSupported: false, useSystemFonts: true, disableFontFace: true,
+    });
+    try { return await work(await task.promise); }
+    finally { await task.destroy(); }
+  }
+
+  function textOfItems(items) {
+    return items.map(item => (item.str || '') + (item.hasEOL ? '\n' : ' '))
+      .join('').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim();
+  }
+
+  async function readPaperPages(paperId, startPage = 1, pageCount = 3) {
+    return withPaperPdf(paperId, async doc => {
+      const pages = [];
+      const end = Math.min(doc.numPages, startPage + pageCount - 1);
+      for (let n = startPage; n <= end; n++) {
+        const page = await doc.getPage(n);
+        const text = textOfItems((await page.getTextContent()).items);
+        pages.push({ page: n, text: text.slice(0, 20000), truncated: text.length > 20000 });
+      }
+      return { paperId, pageCount: doc.numPages, pages, nextPage: end < doc.numPages ? end + 1 : null };
+    });
+  }
+
+  async function findPaperText(paperId, query, startPage = 1, pageCount = 30) {
+    return withPaperPdf(paperId, async doc => {
+      const needle = query.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+      const matches = [];
+      const end = Math.min(doc.numPages, startPage + pageCount - 1);
+      let scanned = 0, lastPage = startPage - 1;
+      for (let n = startPage; n <= end && matches.length < 30; n++) {
+        scanned++;
+        lastPage = n;
+        const page = await doc.getPage(n);
+        const items = (await page.getTextContent()).items;
+        const spans = [];
+        let text = '';
+        for (const item of items) {
+          const value = String(item.str || '').replace(/\s+/g, ' ').trim();
+          if (!value) continue;
+          if (text) text += ' ';
+          const start = text.length;
+          text += value;
+          spans.push({ item, start, end: text.length });
+        }
+        const folded = text.toLocaleLowerCase();
+        const viewport = page.getViewport({ scale: 1 });
+        let at = 0;
+        while ((at = folded.indexOf(needle, at)) >= 0 && matches.length < 30) {
+          const hitEnd = at + needle.length;
+          const quads = [];
+          for (const span of spans) {
+            if (span.end <= at || span.start >= hitEnd || !span.item.transform) continue;
+            const item = span.item;
+            const length = span.end - span.start;
+            const from = Math.max(0, at - span.start) / length;
+            const to = Math.min(length, hitEnd - span.start) / length;
+            const x = item.transform[4], y = item.transform[5];
+            const w = Number(item.width) || 0, h = Number(item.height) || 0;
+            if (w <= 0 || h <= 0) continue;
+            const rect = viewport.convertToViewportRectangle([x + w * from, y, x + w * to, y + h]);
+            const left = Math.max(0, Math.min(rect[0], rect[2]) / viewport.width);
+            const top = Math.max(0, Math.min(rect[1], rect[3]) / viewport.height);
+            const right = Math.min(1, Math.max(rect[0], rect[2]) / viewport.width);
+            const bottom = Math.min(1, Math.max(rect[1], rect[3]) / viewport.height);
+            if (right > left && bottom > top) quads.push({ x: left, y: top, w: right - left, h: bottom - top });
+          }
+          matches.push({ page: n, text: text.slice(at, hitEnd), context: text.slice(Math.max(0, at - 80), Math.min(text.length, hitEnd + 80)), quads });
+          at = hitEnd;
+        }
+      }
+      return { paperId, query, matches, pagesScanned: scanned, limitReached: matches.length >= 30, nextPage: lastPage < doc.numPages ? lastPage + 1 : null };
+    });
+  }
+
+  return { importOnePdfBuffer, importFromPaths, importFromUrl, importFromUrls, fetchRefs, fetchReferences, fetchCitations, autoMatch, downloadRef, downloadAllRefs, resolveImport, readPaperPages, findPaperText };
 }
 
 module.exports = { createService };

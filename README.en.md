@@ -147,8 +147,8 @@ npm run dev          # Browser preview at http://localhost:7100/ (sample data au
 
 PaperWeave offers two agent interfaces. The full contract and its version history are in [`agents/AGENTS.md`](agents/AGENTS.md) (Chinese):
 
-- **Local HTTP Agent API** (`127.0.0.1:24680`, `X-PaperWeave-Token` auth): library management, import, annotations, notes, citation fetch & download, graph snapshot, live progress polling
-- **MCP stdio server** (`mcp/paperweave-mcp.js`, zero-dependency single file): works with Claude Desktop / Cursor / Kimi etc.; tools mirror the HTTP API, plus resources and prompt workflow templates (deep-read / survey / import-and-link)
+- **Local HTTP Agent API** (`127.0.0.1:24680`, `X-PaperWeave-Token` auth): library management, paged PDF text and quote search, annotations, notes, citation fetch and download, cross-library graph data, and progress polling
+- **MCP stdio server** (`mcp/paperweave-mcp.js`, zero-dependency single file): works with Claude Desktop / Cursor / Kimi etc.; exposes paged text, original PDF resources, search, highlighting, and library tools, plus research-assistant guidance and workflows for close reading, reviews, insights, and interest-based highlights
 
 ```jsonc
 // MCP host configuration example

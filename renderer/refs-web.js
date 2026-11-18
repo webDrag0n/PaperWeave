@@ -13,12 +13,25 @@ export function titleSimilarityWeb(a, b) {
 }
 
 // 与 main/refs.js 保持一致：[1] / 1. / [Vaswani+17] 编号或作者-年份标签切分；
-// 无编号列表按作者姓氏起始行启发式切分；按 DOI / arXiv / 标题前缀去重
+// 无编号列表按作者/机构起始行启发式切分；按 DOI / arXiv / 标题前缀去重
 const REF_START_RE_WEB = /^\s*(\[\d{1,3}\]|\d{1,3}[.)]\s|\[[A-Za-z][A-Za-z0-9+&.'\-]{0,13}\d{2,4}[a-z]?\])\s*/;
+
+// 与主进程一致，先去掉会阻断条目结尾判断的重复页眉。
+function referenceLinesWeb(refText) {
+  const lines = String(refText).split('\n');
+  const counts = new Map();
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.length > 0 && t.length <= 80 && /\p{L}/u.test(t) && !/\d/.test(t) && !/[.!?,;:]$/.test(t)) {
+      counts.set(t, (counts.get(t) || 0) + 1);
+    }
+  }
+  return lines.filter(line => (counts.get(line.trim()) || 0) < 2);
+}
 
 export function splitReferenceEntriesWeb(refText) {
   if (!refText) return [];
-  const lines = String(refText).split('\n');
+  const lines = referenceLinesWeb(refText);
   const marked = [];
   let cur = '', sawMarker = false;
   for (const line of lines) {
@@ -35,10 +48,10 @@ export function splitReferenceEntriesWeb(refText) {
   if (cur.trim()) marked.push(cur.trim());
   let entries = marked.filter(e => e.length > 15);
   if (entries.length <= 1) {
-    const newEntryRe = /^\s*[A-Z][A-Za-zÀ-ÿ'&.\-]*(?:\s+(?:[A-Z][A-Za-zÀ-ÿ'&.\-]*|and|et al\.?)){0,10}(?:,|\.)/;
+    const newEntryRe = /^\s*\p{Lu}[\p{L}\p{M}'\x60&.\-¨]*(?:\s+(?:\p{Lu}[\p{L}\p{M}'\x60&.\-¨]*|and|et al\.?)){0,10}(?:,|\.)/u;
     const completeEntry = (text) => {
       const t = text.trim();
-      return /\b(?:19|20)\d{2}[a-z]?\s*[.,)]\s*$/i.test(t) || /https?:\/\/[\s\S]+[.)\]]\s*$/i.test(t);
+      return /\b(?:19|20)\d{2}[a-z]?\s*[.,)]\s*$/i.test(t) || /https?:\s*\/\/[\s\S]+[.)\]]\s*$/i.test(t);
     };
     const rebuilt = [];
     cur = '';
@@ -73,6 +86,12 @@ export function splitReferenceEntriesWeb(refText) {
   return out.slice(0, 300);
 }
 
+function stripFullNameAuthors(s) {
+  const name = String.raw`\p{Lu}[\p{L}\p{M}'\x60¨\-]+(?:\s+(?:\p{Lu}[\p{L}\p{M}'\x60¨\-]*|\p{Lu}\.|de|van|von|der|den|di|da|del|la)){0,5}`;
+  const m = s.match(new RegExp(String.raw`^\s*${name}(?:\s*,\s*${name})*(?:\s*,?\s*(?:and|&)\s*${name})?\.\s+`, 'u'));
+  return m ? s.slice(m[0].length) : null;
+}
+
 function guessRefTitle(entry) {
   const quoted = entry.match(/[“"]([^”"]{15,300})[”"]/);
   if (quoted) return quoted[1];
@@ -81,7 +100,13 @@ function guessRefTitle(entry) {
   let s = entry
     .replace(/\bdoi[:\s]*10\.\S+/i, ' ')
     .replace(/\barxiv[:\s]*(preprint\s+)?(arXiv:)?\d{4}\.\d{4,5}(v\d+)?/i, ' ')
-    .replace(/https?:\/\/\S+/g, ' ');
+    .replace(/https?:\s*\/\/\S+/g, ' ');
+  const etAl = s.match(/^\s*.*?\bet al\.\s+/);
+  const stripped = etAl ? s.slice(etAl[0].length) : stripFullNameAuthors(s);
+  if (stripped !== null) {
+    const title = stripped.split(/(?<=[.?!])\s+/)[0].trim().replace(/\.$/, '').replace(/,\s*volume\s+\d+\s*$/i, '');
+    return title.length >= 2 ? title.slice(0, 300) : null;
+  }
   s = s.replace(/^\s*(((?:[A-Z]\.\s*){0,3}[A-Z][A-Za-zÀ-ÿ'\-]+|[A-Z][A-Za-zÀ-ÿ'\-]+,\s*(?:[A-Z]\.\s*){1,3})(\s*,\s*|\s+and\s+|\s*&\s*))*/, '');
   const segs = s.split(/(?<=[.?!])\s+/).map(x => x.trim()).filter(x => x.length > 10);
   if (!segs.length) return null;

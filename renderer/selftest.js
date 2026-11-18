@@ -24,6 +24,7 @@ export async function runSelftest(ctx) {
     await sleep(400);
     check('批量与导入归属论文库工具栏', document.querySelector('#btnBulkMode').parentElement.id === 'libraryToolbar' && document.querySelector('#btnImport').parentElement.id === 'libraryToolbar');
     check('顶栏不再显示库级批量导入', !document.querySelector('.top-actions').contains(document.querySelector('#btnBulkMode')) && !document.querySelector('.top-actions').contains(document.querySelector('#btnImport')));
+    check('顶栏不显示插件按钮', !document.querySelector('#btnExt'));
     check('语言与 3D 图谱不再共用图标', document.querySelector('#btnLang').textContent.includes('🔤') && document.querySelector('#btnGraphFromLib').textContent.includes('🌐'));
     document.querySelector('#btnSettings').click();
     await sleep(100);
@@ -298,6 +299,23 @@ export async function runSelftest(ctx) {
       check('连续缩放重绘后高亮位置保持稳定', continuousAlignErr < 1.5, 'alignErr=' + continuousAlignErr.toFixed(2));
       viewer.annotations.splice(viewer.annotations.indexOf(zoomAnn), 1);
       viewer._renderAnnotationsFor(zoomPage);
+      document.querySelector('#btnFitWidth').click();
+      await sleep(800);
+      const fittedPage = zoomPage.wrap.getBoundingClientRect();
+      const fittedViewport = document.querySelector('#pdfScroll').getBoundingClientRect();
+      const centerError = (fittedPage.left + fittedPage.right) / 2 - (fittedViewport.left + document.querySelector('#pdfScroll').clientWidth / 2);
+      check('有页边批注时论文正文仍居中', Math.abs(centerError) < 2,
+        'centerErr=' + centerError.toFixed(1) + ' scrollLeft=' + document.querySelector('#pdfScroll').scrollLeft + ' pagesWidth=' + document.querySelector('#pdfPages').getBoundingClientRect().width);
+      viewer.zoom(2.5, { clientX: fittedViewport.left + fittedViewport.width / 2, clientY: fittedViewport.top + fittedViewport.height / 2 });
+      const pdfScroll = document.querySelector('#pdfScroll');
+      pdfScroll.scrollLeft = 0;
+      const leftEdge = zoomPage.wrap.getBoundingClientRect().left - pdfScroll.getBoundingClientRect().left;
+      check('放大后可平移到论文左边缘', leftEdge >= -2, 'left=' + leftEdge.toFixed(1));
+      pdfScroll.scrollLeft = pdfScroll.scrollWidth;
+      const rightEdge = zoomPage.wrap.getBoundingClientRect().right - pdfScroll.getBoundingClientRect().right;
+      check('放大后可平移到论文右边缘', rightEdge <= 2, 'right=' + rightEdge.toFixed(1));
+      const noteRight = zoomPage.noteRail.querySelector('.pdf-margin-note').getBoundingClientRect().right - pdfScroll.getBoundingClientRect().right;
+      check('放大后仍可滚动查看页边批注', noteRight <= 2, 'noteRight=' + noteRight.toFixed(1));
       document.querySelector('#btnFitWidth').click();
       await sleep(800);
     }

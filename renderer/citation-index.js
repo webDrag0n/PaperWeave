@@ -5,10 +5,22 @@ const DOI_RE = /10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i;
 function labelNumber(label) {
   return /^\[\d{1,3}\]$/.test(label) || /^\d{1,3}[.)]$/.test(label) ? parseInt(label.match(/\d{1,3}/)[0], 10) : null;
 }
+function referenceLines(refText) {
+  const lines = String(refText).split('\n');
+  const counts = new Map();
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.length > 0 && t.length <= 80 && /\p{L}/u.test(t) && !/\d/.test(t) && !/[.!?,;:]$/.test(t)) {
+      counts.set(t, (counts.get(t) || 0) + 1);
+    }
+  }
+  return lines.filter(line => (counts.get(line.trim()) || 0) < 2);
+}
 function splitPlainReferences(refText) {
+  const lines = referenceLines(refText);
   const entries = [];
   let current = '', marked = false;
-  for (const line of String(refText).split('\n')) {
+  for (const line of lines) {
     if (LABEL_RE.test(line)) {
       if (current.trim()) entries.push(current.trim());
       current = line.replace(LABEL_RE, '');
@@ -21,9 +33,11 @@ function splitPlainReferences(refText) {
   if (!marked && entries.length <= 1) {
     const rebuilt = [];
     current = '';
-    for (const line of String(refText).split('\n')) {
+    const newEntryRe = /^\s*\p{Lu}[\p{L}\p{M}'\x60&.\-¨]*(?:\s+(?:\p{Lu}[\p{L}\p{M}'\x60&.\-¨]*|and|et al\.?)){0,10}(?:,|\.)/u;
+    const completeEntry = text => /\b(?:19|20)\d{2}[a-z]?\s*[.,)]\s*$/i.test(text.trim()) || /https?:\s*\/\/[\s\S]+[.)\]]\s*$/i.test(text.trim());
+    for (const line of lines) {
       const t = line.trim();
-      if (/^\s*[A-Z][A-Za-zÀ-ÿ'\-]{1,30}(,\s*[A-Z]\.|\s+[A-Z]\.)/.test(t) && current.trim().length > 25) {
+      if (newEntryRe.test(t) && current.trim().length > 25 && completeEntry(current)) {
         rebuilt.push(current.trim()); current = t;
       } else current += (current ? ' ' : '') + t;
     }
@@ -98,16 +112,37 @@ function best(raw, candidates) {
   return hit;
 }
 function surname(raw) {
-  const m = String(raw).slice(0, 160).match(/^\s*(?:[A-Z]\.(?:\s*|$)){0,3}([A-Z][A-Za-zÀ-ÿ'\-]+)/);
-  return m ? m[1].toLowerCase() : '';
+  const s = String(raw).slice(0, 160);
+  const initial = s.match(/^\s*(?:\p{Lu}\.(?:\s*|$)){1,3}(\p{Lu}[\p{L}\p{M}'\x60\-]+)/u);
+  if (initial) return initial[1].toLowerCase();
+  const full = s.match(/^\s*(\p{Lu}[\p{L}\p{M}'\x60¨\-]+(?:\s+(?:\p{Lu}[\p{L}\p{M}'\x60¨\-]*|de|van|von|der|den|di|da|del|la)){0,5})/u);
+  if (!full) return '';
+  const words = full[1].split(/\s+/);
+  return words[words.length - 1].toLowerCase();
 }
 function year(raw) { const m = String(raw).match(/\b(?:19|20)\d{2}\b/); return m ? m[0] : ''; }
+function stripFullNameAuthors(s) {
+  const name = String.raw`\p{Lu}[\p{L}\p{M}'\x60¨\-]+(?:\s+(?:\p{Lu}[\p{L}\p{M}'\x60¨\-]*|\p{Lu}\.|de|van|von|der|den|di|da|del|la)){0,5}`;
+  const m = s.match(new RegExp(String.raw`^\s*${name}(?:\s*,\s*${name})*(?:\s*,?\s*(?:and|&)\s*${name})?\.\s+`, 'u'));
+  return m ? s.slice(m[0].length) : null;
+}
 function guessTitle(raw) {
   const quoted = String(raw).match(/[“"]([^”"]{15,300})[”"]/);
   if (quoted) return quoted[1];
   const apa = String(raw).match(/\((?:19|20)\d{2}[a-z]?\)\.?\s+([^.]{15,300}?)(?:\.\s|\.$|$)/);
   if (apa) return apa[1].trim();
-  const segments = String(raw).split(/(?<=[.?!])\s+/).map(x => x.trim()).filter(x => x.length > 10);
+  let s = String(raw)
+    .replace(/\bdoi[:\s]*10\.\S+/i, ' ')
+    .replace(/\barxiv[:\s]*(preprint\s+)?(arXiv:)?\d{4}\.\d{4,5}(v\d+)?/i, ' ')
+    .replace(/https?:\s*\/\/\S+/g, ' ');
+  const etAl = s.match(/^\s*.*?\bet al\.\s+/);
+  const stripped = etAl ? s.slice(etAl[0].length) : stripFullNameAuthors(s);
+  if (stripped !== null) {
+    const title = stripped.split(/(?<=[.?!])\s+/)[0].trim().replace(/\.$/, '').replace(/,\s*volume\s+\d+\s*$/i, '');
+    return title.length >= 2 ? title.slice(0, 300) : '';
+  }
+  s = s.replace(/^\s*(((?:[A-Z]\.\s*){0,3}[A-Z][A-Za-zÀ-ÿ'\-]+|[A-Z][A-Za-zÀ-ÿ'\-]+,\s*(?:[A-Z]\.\s*){1,3})(\s*,\s*|\s+and\s+|\s*&\s*))*/, '');
+  const segments = s.split(/(?<=[.?!])\s+/).map(x => x.trim()).filter(x => x.length > 10);
   segments.sort((a, b) => b.length - a.length);
   return segments[0] ? segments[0].replace(/\.$/, '').slice(0, 300) : '';
 }

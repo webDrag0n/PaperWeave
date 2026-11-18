@@ -83,8 +83,13 @@ function bestMatch(raw, candidates) {
   return best;
 }
 function firstSurname(raw) {
-  const m = String(raw).slice(0, 160).match(/^\s*(?:[A-Z]\.(?:\s*|$)){0,3}([A-Z][A-Za-zÀ-ÿ'\-]+)/);
-  return m ? m[1].toLowerCase() : '';
+  const s = String(raw).slice(0, 160);
+  const initial = s.match(/^\s*(?:\p{Lu}\.(?:\s*|$)){1,3}(\p{Lu}[\p{L}\p{M}'\x60\-]+)/u);
+  if (initial) return initial[1].toLowerCase();
+  const full = s.match(/^\s*(\p{Lu}[\p{L}\p{M}'\x60¨\-]+(?:\s+(?:\p{Lu}[\p{L}\p{M}'\x60¨\-]*|de|van|von|der|den|di|da|del|la)){0,5})/u);
+  if (!full) return '';
+  const words = full[1].split(/\s+/);
+  return words[words.length - 1].toLowerCase();
 }
 function firstYear(raw) {
   const m = String(raw).match(/\b(?:19|20)\d{2}\b/);

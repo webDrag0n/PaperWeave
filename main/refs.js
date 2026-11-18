@@ -97,13 +97,26 @@ function titleSimilarity(a, b) {
 }
 
 // 从参考文献原文切分条目：[1] / 1. / 1) / [Vaswani+17] 等编号或作者-年份标签
-// 无编号列表（一整段参考文献没有任何起始标记）时按「作者姓氏起始行」启发式切分；
+// 无编号列表（一整段参考文献没有任何起始标记）时按「作者/机构起始行」启发式切分；
 // 并按 DOI / arXiv / 标题前缀去重，避免同一条目重复在线检索。
 const REF_START_RE = /^\s*(\[\d{1,3}\]|\d{1,3}[.)]\s|\[[A-Za-z][A-Za-z0-9+&.'\-]{0,13}\d{2,4}[a-z]?\])\s*/;
 
+// 重复出现的短文本行是跨页页眉；保留它会遮蔽上一条的年份结尾，导致相邻文献合并。
+function referenceLines(refText) {
+  const lines = String(refText).split('\n');
+  const counts = new Map();
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.length > 0 && t.length <= 80 && /\p{L}/u.test(t) && !/\d/.test(t) && !/[.!?,;:]$/.test(t)) {
+      counts.set(t, (counts.get(t) || 0) + 1);
+    }
+  }
+  return lines.filter(line => (counts.get(line.trim()) || 0) < 2);
+}
+
 function splitReferenceEntries(refText) {
   if (!refText) return [];
-  const lines = String(refText).split('\n');
+  const lines = referenceLines(refText);
   // 第一遍：编号/标签切分
   const marked = [];
   let cur = '', sawMarker = false;
@@ -123,11 +136,11 @@ function splitReferenceEntries(refText) {
   // 第二遍：无编号兜底。新条目必须像作者/机构开头，且上一条已有完整年份或 URL 结尾；
   // 这样不会把“Taylor, and Dan Roth.”这类作者列表续行误切为独立文献。
   if (entries.length <= 1) {
-    const newEntryRe = /^\s*[A-Z][A-Za-zÀ-ÿ'&.\-]*(?:\s+(?:[A-Z][A-Za-zÀ-ÿ'&.\-]*|and|et al\.?)){0,10}(?:,|\.)/;
+    const newEntryRe = /^\s*\p{Lu}[\p{L}\p{M}'\x60&.\-¨]*(?:\s+(?:\p{Lu}[\p{L}\p{M}'\x60&.\-¨]*|and|et al\.?)){0,10}(?:,|\.)/u;
     const completeEntry = (text) => {
       const t = text.trim();
       const yearEnd = /\b(?:19|20)\d{2}[a-z]?\s*[.,)]\s*$/i.test(t);
-      const urlEnd = /https?:\/\/[\s\S]+[.)\]]\s*$/i.test(t);
+      const urlEnd = /https?:\s*\/\/[\s\S]+[.)\]]\s*$/i.test(t);
       return yearEnd || urlEnd;
     };
     const rebuilt = [];
@@ -164,7 +177,13 @@ function splitReferenceEntries(refText) {
   return out.slice(0, 300);
 }
 
-// 从单条参考文献猜测标题：引号内、APA「(年份). 标题.」段、或作者年后到期刊前的最长片段
+function stripFullNameAuthors(s) {
+  const name = String.raw`\p{Lu}[\p{L}\p{M}'\x60¨\-]+(?:\s+(?:\p{Lu}[\p{L}\p{M}'\x60¨\-]*|\p{Lu}\.|de|van|von|der|den|di|da|del|la)){0,5}`;
+  const m = s.match(new RegExp(String.raw`^\s*${name}(?:\s*,\s*${name})*(?:\s*,?\s*(?:and|&)\s*${name})?\.\s+`, 'u'));
+  return m ? s.slice(m[0].length) : null;
+}
+
+// 从单条参考文献猜测标题：引号、APA、完整作者列表后的首个句段，最后回退到最长片段
 function guessRefTitle(entry) {
   const quoted = entry.match(/[“"]([^”"]{15,300})[”"]/);
   if (quoted) return quoted[1];
@@ -175,9 +194,14 @@ function guessRefTitle(entry) {
   let s = entry
     .replace(/\bdoi[:\s]*10\.\S+/i, ' ')
     .replace(/\barxiv[:\s]*(preprint\s+)?(arXiv:)?\d{4}\.\d{4,5}(v\d+)?/i, ' ')
-    .replace(/https?:\/\/\S+/g, ' ');
-  // 去掉开头作者段（含 "and"/"&" 连接的多个作者，支持 "A. Vaswani" 与 "Vaswani, A." 两种写法；
-  // 分隔符必须是逗号/and/&，不允许纯空格，防止把标题首词误当作者吃掉）
+    .replace(/https?:\s*\/\/\S+/g, ' ');
+  const etAl = s.match(/^\s*.*?\bet al\.\s+/);
+  const stripped = etAl ? s.slice(etAl[0].length) : stripFullNameAuthors(s);
+  if (stripped !== null) {
+    const title = stripped.split(/(?<=[.?!])\s+/)[0].trim().replace(/\.$/, '').replace(/,\s*volume\s+\d+\s*$/i, '');
+    return title.length >= 2 ? title.slice(0, 300) : null;
+  }
+  // 姓名缩写格式沿用作者段剥离与最长句段兜底。
   s = s.replace(/^\s*(((?:[A-Z]\.\s*){0,3}[A-Z][A-Za-zÀ-ÿ'\-]+|[A-Z][A-Za-zÀ-ÿ'\-]+,\s*(?:[A-Z]\.\s*){1,3})(\s*,\s*|\s+and\s+|\s*&\s*))*/, '');
   const segs = s.split(/(?<=[.?!])\s+/).map(x => x.trim()).filter(x => x.length > 10);
   if (!segs.length) return null;
