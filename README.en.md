@@ -47,58 +47,49 @@ The app UI switches between Chinese and English (🔤 button in the top bar, pre
 
 ## ✨ Features
 
-### 📄 Reading & annotation
+### 📄 Reading, annotation & notes
 
-- **PDF reading**: multi-page rendering, lazy rendering for long documents, smooth Ctrl+wheel zoom centered on the pointer, ↔ fit-width, ← → page navigation, text selection & copy
-- **Outline sidebar**: a slim left rail expands into a translucent outline panel; clicking an entry **jumps precisely to the section heading** (outline dest coordinates + title-text-line fallback)
-- **Highlights**: a selection toolbar offers 5 colors and Markdown comments; commented text is marked with a colored underline linked to its Markdown margin card. Click an existing highlight to recolor it, edit the comment, or delete it; "📌 Sticky notes" can be placed anywhere on a page
-- **In-paper search & annotation packages**: search selected text with one click or use Ctrl+F for full-text results. Export a `.pwpackage` containing the original PDF, metadata and all annotations from the reader, then restore it from the import dialog; annotations merge with existing ones by ID
-- **In-text citation hover cards**: hover a `[1]` or author–year citation in the body text to see the matching reference; open it directly if it is in the library, or download it if it is not
-- **Notes**: per-paper Markdown notes with edit/preview toggle and auto-save
-- **Reading experience**: per-paper reading position memory (restored on reopen); collapsible side panel for focus reading; 🌙 eye-care mode; ☀️ light / dark themes (graph palette follows the theme)
+- **Smooth reading**: lazy rendering for long documents, pointer-centered smooth zoom, fit-width, precise outline jumps and reading-position memory; collapsible side panel, eye-care, light / dark themes and a Chinese / English UI
+- **Highlights plus underlines**: five highlight colors keep their background while comments add a colored underline; overlapping underlines get separate lanes, and widely spaced leaders connect Markdown margin cards so same-color annotations remain distinguishable
+- **Markdown comments & sticky notes**: edit and preview comments in the margin and annotation list, place sticky notes anywhere, and keep auto-saved Markdown notes for each paper
+- **In-paper search**: search selected text with one click or press `Ctrl+F` to search the whole PDF and jump to matches
+- **Restorable annotation packages**: export a `.pwpackage` with the original PDF, metadata and all annotations, then restore it from the import dialog; annotations merge with existing ones by ID
+- **Citation hover cards**: hover a `[1]` or author–year citation to inspect it; open papers already in the library or download missing ones
 
-![Reader](README.assets/02-reader.png)
+![Highlight background, underline and Markdown annotations](README.assets/02-reader.png)
+![Citation hover card](README.assets/03-citation-popup.png)
 
-### ⭐ Library management
+### ⭐ Library, search & sorting
 
-- **Multiple libraries**: a collapsible left panel manages libraries as cards — name & description (click ✎ to edit inline), ★ pin to top, drag to reorder, delete requires typing the full name to confirm; the initial default library is always named `New Weave`
-- **All downloaded**: inspect the global registry and cross-library links independently of any library, including papers left without a library after deletion; deleting here removes the paper globally
-- **Configurable storage**: choose separate PDF and data directories in "⚙ Settings"; existing files are copied and originals kept, PDF changes apply immediately, and data-directory changes apply after restart
-- **Unified import**: one "📥 Import" modal handles pasted links (direct PDF / arXiv), drag-and-drop files, and click-to-browse multi-select; multiple links download in parallel with adaptive concurrency and live progress
-- **One unified paper store**: each paper is stored once globally (same id reused across libraries); a library only holds paper ids and its own citation links
-- **Smart dedupe**: content-hash hits are reused directly; same DOI (possibly different versions) or very similar titles trigger a **confirmation dialog** — reuse the existing paper or import as new
-- **Automatic metadata**: title / authors / DOI / abstract / references section extracted on import; publication years prefer arXiv ids and explicit publication markers instead of arbitrary four-digit numbers in the body
-- **Importance rating**: 1–5 stars right on the card; manual imports default to 1 star, citation-downloaded papers default to unrated
-- **Sections & sorting**: grouped by rating by default, or by year added, publication year, title initial, author initial, or citation count, with sorting inside every section; search results retain the same sections
-- Search, tags, favorites, bulk management; **titles support inline Markdown** (`**bold**`, `*italic*`, `` `code` ``, `~~strike~~`)
+- **Multiple libraries**: manage names, descriptions, icons, pinned state and drag order; "All downloaded" aggregates papers and links across libraries
+- **Unified import & dedupe**: local PDFs, drag-and-drop, URLs / arXiv and the browser extension; content hashes reuse papers, while DOI or highly similar title conflicts ask for confirmation
+- **Automatic metadata**: extract title, authors, DOI, abstract and references; publication years prefer arXiv ids and explicit publication markers
+- **Sections plus sorting within each**: group by rating, year added, publication year, title initial, author initial or citation count; search results retain the same sections
+- **Paper management**: search, tags, favorites, bulk selection, 1–5 star ratings and inline-Markdown titles
+- **Configurable local storage**: choose separate PDF and data directories without deleting originals; parallel startup loading renders the first cards before annotation counts finish in the background
 
-![Library](README.assets/01-library.png)
-![Light theme](README.assets/06-light-theme.png)
+![Library and rating sections](README.assets/01-library.png)
+![Light-theme library](README.assets/06-light-theme.png)
 
 ### 🌐 Citation graph & timeline
 
-- Force-directed 3D graph with persistent labels, node glow and smooth camera transitions; the top search highlights every matching node, timeline ticks stay aligned while panning, and rotation stays centered on the node centroid
-- **Hop-depth slider** (1–5, default 2): 🟡 selected paper, neighbors colored per hop (blue/orange/purple/green/pink), nodes beyond N hops stay gray
-- **Shift+click multi-select**: the network view outlines shortest paths, while the timeline highlights all citation paths between selected papers (without overriding hop colors); hop distance is measured from the nearest selected node
-- **2D timeline view**: papers laid out by publication year, with unknown years in their own column; wheel zooms both axes, Shift zooms horizontally, Ctrl zooms vertically
-- **Upstream / downstream lineage**: for a single paper, recursively shows its references and citing papers while leaving out side branches
-- Combine rating and multi-select author filters; click an author in the paper details to toggle that filter. Enter from the library toolbar / reader toolbar / card "Graph" button — exiting returns to where you came from (Esc works too)
-- Drag to rotate · scroll to zoom · click to select · double-click to open
+- **3D citation network**: force-directed layout, node glow and hop colors; camera fitting respects node and label boundaries, and rotation stays centered on the node centroid
+- **Multi-select paths**: shortest paths in the network view, or all citation paths between selected papers in the timeline
+- **Aligned time ticks**: papers are grouped by publication year, and the ruler stays aligned while panning; zoom both axes independently or together
+- **Search all nodes**: the top search highlights every match and dims the rest instead of focusing only the first result
+- **Filters & lineage**: combine rating and multi-author filters, or recursively inspect a paper's complete upstream and downstream history
+- **Searchable relation panels**: reader and graph-side reference/citation lists support independent search and sorting by year, author initial or title initial
 
-### 🔗 Citation engine
+![Timeline and relation panels](README.assets/04-graph-timeline.png)
 
-- **Resolve on import**: every imported/downloaded paper gets its citation relations resolved automatically in the background; the reader and graph side panel show live progress, restored after switching views while work is still running
-- **Fetch references**: prefers Semantic Scholar's structured references (paginated, most accurate); falls back to parsing the PDF references section (`[1]` / `1.` / `[Vaswani+17]` / unnumbered lists, institutional authors, hyphenated line breaks, appendix cut-off; deduplicated), resolving each entry via DOI (CrossRef) / arXiv / S2 title match / OpenAlex
-- **Fetch citations**: Semantic Scholar (throttled with backoff), automatic OpenAlex fallback with pagination
-- **Not-in-library loop**: resolved-but-absent entries are persisted in the "Refs" panel — **download individually or all at once with adaptive concurrency** (arXiv / OpenAlex open access), auto-linked on import and shown in the graph; background downloads never block reading; papers without OA PDFs or with other failures appear in an expandable top list with reasons and per-item retry
-- 🧩 Offline fuzzy matching (no network) and ➕ manual linking as fallbacks
+### 🔗 Citation engine & discovery
 
-### 🧭 Similarity & discovery
+- **Automatic citation resolution**: Semantic Scholar structured data first, with PDF reference parsing as fallback; numbered and unnumbered entries, institutional authors and hyphenated line breaks are supported, and citation fetching can fall back to OpenAlex
+- **Close the missing-paper loop**: download individual or batched references, then auto-link them into the graph; failures include reasons and retry, with offline matching and manual linking as fallbacks
+- **Similar papers**: shared references and shared citers produce a Top 5 list with overlap scores in the detail panel
+- **Discover beyond the library**: aggregate citation overlap to find prior works and derivative papers, then download them into the library in one click
 
-- **Similar papers**: bibliographic coupling (shared references) × co-citation (shared citers) compute in-library similarity; selecting a paper shows its Top 5 similar papers with overlap percentages in the detail panel — click to jump
-- **Discover beyond the library**: the "🧭 Discover" button on the library toolbar aggregates reference/citation overlap across the whole library — "🏛 Prior works" lists foundational papers co-cited by multiple library papers but not yet imported; "🌱 Derivative works" lists new papers citing multiple library papers — each downloadable into the library in one click
-
-![Discover](README.assets/08-discover.png)
+![Discover beyond the library](README.assets/08-discover.png)
 
 ### 🧩 Browser extension
 

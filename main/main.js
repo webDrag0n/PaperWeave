@@ -346,11 +346,11 @@ app.whenReady().then(async () => {
   service = createService(store, { progressFor: (id) => progressEmitter(id) });
   registerIpc();
   placeAgentsDoc();
-  await startAgentInterface();
   if (!HEADLESS) {
     createWindow();
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   }
+  await startAgentInterface();
 });
 
 app.on('window-all-closed', () => {

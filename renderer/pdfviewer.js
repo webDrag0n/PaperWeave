@@ -286,8 +286,8 @@ export class PdfViewer {
 
   _layoutUnderlines(p) {
     const height = p.viewport1.height * this.scale;
-    const lineHeight = Math.max(1.5, height * 0.0025);
-    const gap = Math.max(1, lineHeight * 0.6);
+    const lineHeight = Math.max(2, height * 0.0025);
+    const gap = Math.max(4, lineHeight * 1.5);
     const entries = [];
     for (const a of this.annotations.filter(x => x.type === 'highlight' && x.page === p.num && x.comment && Array.isArray(x.quads))) {
       PdfViewer.normalizeQuads(a.quads).forEach((q, quadIndex) => {
@@ -324,28 +324,36 @@ export class PdfViewer {
       if (a.type === 'highlight' && Array.isArray(a.quads)) {
         // 百分比坐标始终绑定页面本身，交互缩放和高清重绘都不需要重新猜测像素位置。
         PdfViewer.normalizeQuads(a.quads).forEach((q, quadIndex) => {
-          const box = document.createElement('div');
-          const underlined = !!a.comment;
-          box.className = 'hl-box' + (underlined ? ' annotation-underline' : '');
-          box.dataset.annotationId = a.id;
-          box.style.left = (q.x * 100) + '%';
-          box.style.width = (q.w * 100) + '%';
-          if (underlined) {
-            const layout = underlineLayout.byId.get(a.id)?.[quadIndex];
-            if (!layout) return;
-            box.style.top = (layout.top / underlineLayout.height * 100) + '%';
-            box.style.height = (underlineLayout.lineHeight / underlineLayout.height * 100) + '%';
-          } else {
-            box.style.top = (q.y * 100) + '%';
-            box.style.height = (q.h * 100) + '%';
-          }
-          box.style.background = a.color || '#ffe74a';
-          box.title = a.comment || a.text || '';
-          box.addEventListener('click', (ev) => {
+          const openMenu = (ev) => {
             ev.stopPropagation();
             this.opts.onAnnotClick && this.opts.onAnnotClick(a, ev);
-          });
+          };
+          const box = document.createElement('div');
+          box.className = 'hl-box';
+          box.dataset.annotationId = a.id;
+          box.style.left = (q.x * 100) + '%';
+          box.style.top = (q.y * 100) + '%';
+          box.style.width = (q.w * 100) + '%';
+          box.style.height = (q.h * 100) + '%';
+          box.style.background = a.color || '#ffe74a';
+          box.title = a.comment || a.text || '';
+          box.addEventListener('click', openMenu);
           p.hlLayer.appendChild(box);
+          if (a.comment) {
+            const layout = underlineLayout.byId.get(a.id)?.[quadIndex];
+            if (!layout) return;
+            const underline = document.createElement('div');
+            underline.className = 'hl-box annotation-underline';
+            underline.dataset.annotationId = a.id;
+            underline.style.left = (q.x * 100) + '%';
+            underline.style.top = (layout.top / underlineLayout.height * 100) + '%';
+            underline.style.width = (q.w * 100) + '%';
+            underline.style.height = (underlineLayout.lineHeight / underlineLayout.height * 100) + '%';
+            underline.style.background = a.color || '#ffe74a';
+            underline.title = a.comment;
+            underline.addEventListener('click', openMenu);
+            p.hlLayer.appendChild(underline);
+          }
         });
       } else if (a.type === 'sticky') {
         const icon = document.createElement('div');
@@ -378,8 +386,8 @@ export class PdfViewer {
       .map(a => ({ a, entry: underlineLayout.byId.get(a.id)?.[0] }))
       .filter(x => x.entry)
       .sort((x, y) => x.entry.top - y.entry.top || String(x.a.id).localeCompare(String(y.a.id)));
-    const channelWidth = Math.max(16, Math.min(72, notes.length * 3 + 4));
-    const channelGap = (channelWidth - 4) / Math.max(1, notes.length);
+    const channelWidth = Math.max(28, Math.min(112, notes.length * 8 + 8));
+    const channelGap = (channelWidth - 8) / Math.max(1, notes.length);
     notes.forEach(({ a, entry }, index) => {
       const q = entry.q;
       const card = document.createElement('div');

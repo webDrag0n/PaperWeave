@@ -64,9 +64,13 @@ function esc(s) {
 
 async function refreshData() {
   const global = state.libraryScope === 'all';
-  state.papers = await (global ? bridge.listAllPapers() : bridge.listPapers());
-  state.links = await (global ? bridge.listAllLinks() : bridge.listLinks());
-  await loadLibraries(); // 库卡片计数同步刷新
+  const [papers, links] = await Promise.all([
+    global ? bridge.listAllPapers() : bridge.listPapers(),
+    global ? bridge.listAllLinks() : bridge.listLinks(),
+    loadLibraries(), // 库卡片计数同步刷新
+  ]);
+  state.papers = papers;
+  state.links = links;
 }
 
 /* ---------------- 论文库面板（左侧，可展开缩回） ---------------- */
@@ -848,9 +852,14 @@ function renderLibrary() {
 }
 
 async function updateAnnotCounts() {
-  for (const p of state.papers) {
-    p._annCount = (await bridge.listAnnotations(p.id)).length;
-  }
+  const queue = [...state.papers];
+  const workers = Array.from({ length: Math.min(8, queue.length) }, async () => {
+    while (queue.length) {
+      const p = queue.shift();
+      p._annCount = (await bridge.listAnnotations(p.id)).length;
+    }
+  });
+  await Promise.all(workers);
 }
 
 /* ---------------- 导入 ---------------- */
@@ -2616,15 +2625,14 @@ async function init() {
   applyLanguage(getLang()); // 应用界面语言（含静态文案与动态区域）
   bindEvents();
   setLibSidebarCollapsed(localStorage.getItem('pg-lib-collapsed') === '1');
-  await loadLibraries(); // 多论文库：载入列表与当前库
   if (isWeb) {
     // 浏览器预览模式：首次载入示例论文库
     await bridge.seedSamplesIfEmpty();
   }
   await refreshData();
-  await updateAnnotCounts();
   renderLibrary();
   showView('library');
+  updateAnnotCounts().then(renderLibrary);
 
   // Agent API 等外部数据源变更时刷新界面
   if (bridge.onDataChanged) {

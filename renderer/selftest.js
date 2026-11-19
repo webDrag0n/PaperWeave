@@ -205,7 +205,9 @@ export async function runSelftest(ctx) {
     check('高亮图层作为文字背景混合而非覆盖文字', getComputedStyle(viewer.pages[0].hlLayer).mixBlendMode === 'multiply' && getComputedStyle(viewer.pages[0].textLayerEl).mixBlendMode === 'multiply');
     check('有批注的高亮在页边显示卡片与引线', !!viewer.pages[0].noteRail.querySelector('.pdf-margin-note') && !!viewer.pages[0].noteLines.querySelector('path'));
     const noteUnderline = viewer.pages[0].hlLayer.querySelector('.annotation-underline');
-    check('文字批注使用下划线而非整块底色', !!noteUnderline && noteUnderline.getBoundingClientRect().height <= 3);
+    check('文字批注保留下划线标记', !!noteUnderline && noteUnderline.getBoundingClientRect().height <= 3);
+    const noteBackground = viewer.pages[0].hlLayer.querySelector('.hl-box[data-annotation-id="a_test_hl"]:not(.annotation-underline)');
+    check('文字批注同时保留原高亮底色', !!noteBackground && noteBackground.getBoundingClientRect().height > noteUnderline.getBoundingClientRect().height + 4);
     check('批注包导入导出入口存在', !!document.querySelector('#btnExportPackage') && !!document.querySelector('#btnImportPackage'));
     window.getSelection().removeAllRanges();
     const highlightRect = viewer.pages[0].wrap.getBoundingClientRect();
@@ -242,6 +244,9 @@ export async function runSelftest(ctx) {
       if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.2) laneOverlap++;
     }
     check('重合批注下划线自动分配独立轨道', laneBoxes.length >= 3 && laneOverlap === 0, 'overlaps=' + laneOverlap);
+    const laneTops = laneBoxes.map(box => box.top).sort((a, b) => a - b);
+    const minLaneGap = Math.min(...laneTops.slice(1).map((top, i) => top - laneTops[i]));
+    check('同色下划线具有清晰垂直间距', minLaneGap >= 6, 'gap=' + minLaneGap.toFixed(2));
     const leaderSegments = [...viewer.pages[0].noteLines.querySelectorAll('path')].map(path => {
       const n = path.getAttribute('d').match(/M\s+([\d.-]+)\s+([\d.-]+)\s+H\s+([\d.-]+)\s+V\s+([\d.-]+)\s+H\s+([\d.-]+)/).slice(1).map(Number);
       return [
@@ -262,6 +267,9 @@ export async function runSelftest(ctx) {
       for (const a of leaderSegments[i]) for (const b of leaderSegments[j]) if (leadersCross(a, b)) leaderCrossings++;
     }
     check('页边引线无交叉或共用线段', leaderSegments.length >= 3 && leaderCrossings === 0, 'crossings=' + leaderCrossings);
+    const leaderChannels = leaderSegments.map(segments => segments[1].x1).sort((a, b) => a - b);
+    const minLeaderGap = Math.min(...leaderChannels.slice(1).map((x, i) => x - leaderChannels[i]));
+    check('同色页边引线具有清晰水平间距', minLeaderGap >= 6, 'gap=' + minLeaderGap.toFixed(2));
     for (const ann of laneAnnotations) {
       const index = viewer.annotations.findIndex(a => a.id === ann.id);
       if (index >= 0) viewer.annotations.splice(index, 1);
